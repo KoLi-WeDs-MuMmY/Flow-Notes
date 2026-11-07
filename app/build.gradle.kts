@@ -9,13 +9,31 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
-// Automatically materialize debug.keystore from debug.keystore.base64 on fresh GitHub clones
+// Automatically materialize debug.keystore on fresh GitHub clones (where debug.keystore is not tracked)
 val debugKeystoreFile = file("${rootDir}/debug.keystore")
 val debugKeystoreBase64File = file("${rootDir}/debug.keystore.base64")
-if (!debugKeystoreFile.exists() && debugKeystoreBase64File.exists()) {
-  runCatching {
-    val cleanBase64 = debugKeystoreBase64File.readText().replace("\\s".toRegex(), "")
-    debugKeystoreFile.writeBytes(Base64.getDecoder().decode(cleanBase64))
+if (!debugKeystoreFile.exists()) {
+  if (debugKeystoreBase64File.exists()) {
+    runCatching {
+      val cleanBase64 = debugKeystoreBase64File.readText().replace("\\s".toRegex(), "")
+      debugKeystoreFile.writeBytes(Base64.getDecoder().decode(cleanBase64))
+    }
+  } else {
+    runCatching {
+      ProcessBuilder(
+        "keytool",
+        "-genkeypair",
+        "-v",
+        "-keystore", debugKeystoreFile.absolutePath,
+        "-storepass", "android",
+        "-alias", "androiddebugkey",
+        "-keypass", "android",
+        "-keyalg", "RSA",
+        "-keysize", "2048",
+        "-validity", "10000",
+        "-dname", "CN=Android Debug,O=Android,C=US"
+      ).inheritIO().start().waitFor()
+    }
   }
 }
 

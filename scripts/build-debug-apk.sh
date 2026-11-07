@@ -3,10 +3,23 @@ set -euo pipefail
 
 echo "==> Preparing CanvasFlow environment..."
 
-# 1. Decode debug.keystore from debug.keystore.base64 if missing
-if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
-  echo "==> Decoding debug.keystore from debug.keystore.base64..."
-  tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore
+# 1. Ensure debug.keystore exists (decode from base64 if present, otherwise generate via keytool)
+if [ ! -f "debug.keystore" ]; then
+  if [ -f "debug.keystore.base64" ]; then
+    echo "==> Decoding debug.keystore from debug.keystore.base64..."
+    tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore
+  else
+    echo "==> Generating standard Android debug.keystore via keytool..."
+    keytool -genkeypair -v \
+      -keystore debug.keystore \
+      -storepass android \
+      -alias androiddebugkey \
+      -keypass android \
+      -keyalg RSA \
+      -keysize 2048 \
+      -validity 10000 \
+      -dname "CN=Android Debug,O=Android,C=US"
+  fi
 fi
 
 # 2. Ensure .env exists for Secrets Gradle Plugin
