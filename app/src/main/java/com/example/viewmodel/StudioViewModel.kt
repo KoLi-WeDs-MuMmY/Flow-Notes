@@ -5,13 +5,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.FolderEntity
 import com.example.data.SketchPageEntity
 import com.example.data.SketchRepository
 import com.example.data.StudioDatabase
+import com.example.model.AppDestination
 import com.example.model.CanvasTextNote
 import com.example.model.DevicePosture
 import com.example.model.DrawingTool
 import com.example.model.DrawnStroke
+import com.example.model.FolderIconType
+import com.example.model.HomeFilterMode
 import com.example.model.PaperTemplate
 import com.example.model.ScreenCoveragePreset
 import com.example.model.ScreenFloatMetrics
@@ -19,6 +23,7 @@ import com.example.model.StrokePoint
 import com.example.model.StudioPalettes
 import com.example.util.ColorMath
 import com.example.util.HsvColor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,10 +33,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class StudioUiState(
+    // Navigation & Nested Folder Explorer State
+    val currentDestination: AppDestination = AppDestination.HOME_EXPLORER,
+    val currentFolderId: Long? = null,
+    val homeFilterMode: HomeFilterMode = HomeFilterMode.EXPLORER,
+    val searchQuery: String = "",
+    // Active Sheet State in Studio Canvas
     val activePageId: Long = 0L,
+    val activePageFolderId: Long? = null,
+    val activePageIsFavorite: Boolean = false,
     val activePageTitle: String = "Studio Welcome & Color Study",
     val activePageCategory: String = "Drawing & Notes",
     val paperTemplate: PaperTemplate = PaperTemplate.DOT_MATRIX,
@@ -52,7 +66,6 @@ data class StudioUiState(
     // Multi-Screen Float & Coverage Percentages State
     val coveragePreset: ScreenCoveragePreset = ScreenCoveragePreset.STUDIO_BALANCED,
     val customCoverageFloat: Float = 0.90f,
-    // Normalized float position (0.0f..1.0f) for draggable floating studio palette
     val floatingPaletteXFraction: Float = 0.50f,
     val floatingPaletteYFraction: Float = 0.92f,
     // Color Picker & Swatches
@@ -70,13 +83,18 @@ data class StudioUiState(
     val isPaperPickerOpen: Boolean = false,
     val isScreenInspectorOpen: Boolean = false,
     val isSketchbookDrawerOpen: Boolean = false,
-    val isAddNoteDialogOpen: Boolean = false
+    val isAddNoteDialogOpen: Boolean = false,
+    val isNewFolderDialogOpen: Boolean = false,
+    val isNewSheetDialogOpen: Boolean = false,
+    val pageToMove: SketchPageEntity? = null
 )
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val db = StudioDatabase.getInstance(application)
     private val repository: SketchRepository = SketchRepository(
-        StudioDatabase.getInstance(application).sketchPageDao()
+        pageDao = db.sketchPageDao(),
+        folderDao = db.folderDao()
     )
 
     private val _uiState = MutableStateFlow(StudioUiState())
@@ -89,32 +107,44 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             initialValue = emptyList()
         )
 
+    val allFolders: StateFlow<List<FolderEntity>> = repository.allFolders
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     private var autoSaveJob: Job? = null
 
     init {
         viewModelScope.launch {
-            val firstSeededId = repository.seedStarterPagesIfEmpty()
+            val firstSeededId = repository.seedStarterWorkspaceIfEmpty()
             val pageToLoad = if (firstSeededId > 0) {
                 repository.getPageById(firstSeededId)
             } else {
                 repository.getPageById(1L)
             }
             if (pageToLoad != null) {
-                applyLoadedPage(pageToLoad)
+                applyLoadedPageOffThread(pageToLoad)
             }
         }
     }
 
-    private fun applyLoadedPage(entity: SketchPageEntity) {
-        val template = runCatching {
-            PaperTemplate.valueOf(entity.paperTemplateName)
-        }.getOrDefault(PaperTemplate.DOT_MATRIX)
-        val loadedStrokes = SketchRepository.deserializeStrokes(entity.strokesPayload)
-        val loadedNotes = SketchRepository.deserializeTextNotes(entity.textNotesPayload)
+    private suspend fun applyLoadedPageOffThread(entity: SketchPageEntity) {
+        val (template, loadedStrokes, loadedNotes) = withContext(Dispatchers.Default) {
+            val tpl = runCatching {
+                PaperTemplate.valueOf(entity.paperTemplateName)
+            }.getOrDefault(PaperTemplate.DOT_MATRIX)
+            val strokes = SketchRepository.deserializeStrokes(entity.strokesPayload)
+            val notes = SketchRepository.deserializeTextNotes(entity.textNotesPayload)
+            Triple(tpl, strokes, notes)
+        }
 
         _uiState.update { state ->
             state.copy(
                 activePageId = entity.id,
+                activePageFolderId = entity.folderId,
+                activePageIsFavorite = entity.isFavorite,
                 activePageTitle = entity.title,
                 activePageCategory = entity.categoryTag,
                 paperTemplate = template,
@@ -127,6 +157,137 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
     }
+
+    // --- Home Page & Nested Folder Navigation ---
+
+    fun navigateToHomeExplorer() {
+        saveActivePageNow()
+        _uiState.update {
+            it.copy(
+                currentDestination = AppDestination.HOME_EXPLORER,
+                isSketchbookDrawerOpen = false
+            )
+        }
+    }
+
+    fun openSheetInCanvas(page: SketchPageEntity) {
+        if (_uiState.value.currentDestination == AppDestination.STUDIO_CANVAS) {
+            saveActivePageNow()
+        }
+        viewModelScope.launch {
+            applyLoadedPageOffThread(page)
+            _uiState.update {
+                it.copy(
+                    currentDestination = AppDestination.STUDIO_CANVAS,
+                    isSketchbookDrawerOpen = false
+                )
+            }
+        }
+    }
+
+    fun resumeActiveCanvas() {
+        _uiState.update { it.copy(currentDestination = AppDestination.STUDIO_CANVAS) }
+    }
+
+    fun selectHomeFilterMode(mode: HomeFilterMode) {
+        _uiState.update { it.copy(homeFilterMode = mode) }
+    }
+
+    fun updateSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun openFolder(folderId: Long?) {
+        _uiState.update {
+            it.copy(
+                currentFolderId = folderId,
+                homeFilterMode = HomeFilterMode.EXPLORER
+            )
+        }
+    }
+
+    /**
+     * Steps up one level in the nested folder tree.
+     * Returns true if navigated to a parent folder, or false if already at Root (null).
+     */
+    fun navigateUpFolder(): Boolean {
+        val currentId = _uiState.value.currentFolderId ?: return false
+        val currentFolder = allFolders.value.firstOrNull { it.id == currentId }
+        _uiState.update { it.copy(currentFolderId = currentFolder?.parentFolderId) }
+        return true
+    }
+
+    /**
+     * Builds the ordered ancestor breadcrumb chain from Root down to [targetFolderId].
+     */
+    fun buildBreadcrumbPath(targetFolderId: Long?, folders: List<FolderEntity>): List<FolderEntity> {
+        if (targetFolderId == null) return emptyList()
+        val folderMap = folders.associateBy { it.id }
+        val chain = ArrayList<FolderEntity>()
+        var cursorId: Long? = targetFolderId
+        val visited = HashSet<Long>()
+        while (cursorId != null && visited.add(cursorId)) {
+            val folder = folderMap[cursorId] ?: break
+            chain.add(folder)
+            cursorId = folder.parentFolderId
+        }
+        chain.reverse()
+        return chain
+    }
+
+    fun createSubfolder(name: String, colorArgb: Long, iconType: FolderIconType) {
+        val parentId = _uiState.value.currentFolderId
+        viewModelScope.launch {
+            repository.createFolder(
+                name = name,
+                parentFolderId = parentId,
+                colorArgb = colorArgb,
+                iconType = iconType
+            )
+            _uiState.update { it.copy(isNewFolderDialogOpen = false) }
+        }
+    }
+
+    fun deleteFolder(folderId: Long) {
+        viewModelScope.launch {
+            val deletingCurrent = _uiState.value.currentFolderId == folderId
+            val parentId = allFolders.value.firstOrNull { it.id == folderId }?.parentFolderId
+            repository.deleteFolderSafely(folderId)
+            if (deletingCurrent) {
+                _uiState.update { it.copy(currentFolderId = parentId) }
+            }
+        }
+    }
+
+    fun movePageToFolder(pageId: Long, targetFolderId: Long?) {
+        viewModelScope.launch {
+            repository.movePageToFolder(pageId, targetFolderId)
+            _uiState.update { state ->
+                val updatedActiveFolder = if (state.activePageId == pageId) targetFolderId else state.activePageFolderId
+                state.copy(
+                    activePageFolderId = updatedActiveFolder,
+                    pageToMove = null
+                )
+            }
+        }
+    }
+
+    fun togglePageFavorite(page: SketchPageEntity) {
+        viewModelScope.launch {
+            repository.togglePageFavorite(page)
+            if (_uiState.value.activePageId == page.id) {
+                _uiState.update { it.copy(activePageIsFavorite = !page.isFavorite) }
+            }
+        }
+    }
+
+    fun duplicatePage(page: SketchPageEntity) {
+        viewModelScope.launch {
+            repository.duplicatePage(page)
+        }
+    }
+
+    // --- Studio Drawing & Writing Controls ---
 
     fun selectTool(tool: DrawingTool) {
         _uiState.update { state ->
@@ -289,7 +450,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         triggerAutoSave()
     }
 
-    // Pinch-to-Zoom and Gesture Transform Handlers
+    // --- Pinch-to-Zoom and Gesture Transform Handlers ---
+
     fun onPinchZoomAndPan(
         centroid: Offset,
         panDelta: Offset,
@@ -302,7 +464,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             val newZoom = (oldZoom * zoomChange).coerceIn(0.25f, 8.0f)
             val effectiveZoomFactor = newZoom / oldZoom
 
-            // Zoom smoothly around the pinch centroid in screen space
             val newPanX = centroid.x - (centroid.x - state.panOffsetX) * effectiveZoomFactor + panDelta.x
             val newPanY = centroid.y - (centroid.y - state.panOffsetY) * effectiveZoomFactor + panDelta.y
 
@@ -333,13 +494,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         triggerAutoSave()
     }
 
-    fun setExactZoomFloat(targetZoom: Float) {
-        _uiState.update { state ->
-            state.copy(zoomFloat = targetZoom.coerceIn(0.25f, 8.0f))
-        }
-        triggerAutoSave()
-    }
-
     fun resetZoomAndPan() {
         _uiState.update { state ->
             state.copy(
@@ -359,7 +513,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(showMinimap = !it.showMinimap) }
     }
 
-    // Multi-Screen Float & Screen Coverage Controls
+    // --- Variable-Screen Float & Screen Coverage Controls ---
+
     fun selectCoveragePreset(preset: ScreenCoveragePreset) {
         _uiState.update { state ->
             state.copy(
@@ -394,8 +549,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
         val posture = when {
             safeW >= 840f -> DevicePosture.TABLET_EXPANDED
-            safeW >= 600f && aspect in 0.75f..1.45f -> DevicePosture.FOLDABLE_MEDIUM
-            aspect > 1.25f -> DevicePosture.MOBILE_LANDSCAPE
+            safeW >= 600f && aspect in 0.70f..1.55f -> DevicePosture.FOLDABLE_MEDIUM
+            aspect > 1.22f -> DevicePosture.MOBILE_LANDSCAPE
             else -> DevicePosture.MOBILE_PORTRAIT
         }
 
@@ -435,6 +590,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             else -> 0.0f
         }
 
+        // Variable-Screen Float Allocations for the Home Page & Folder Explorer
+        val homeSidebarWidthFraction = when (posture) {
+            DevicePosture.TABLET_EXPANDED -> 0.26f
+            DevicePosture.FOLDABLE_MEDIUM -> 0.30f
+            DevicePosture.MOBILE_LANDSCAPE -> 0.32f
+            DevicePosture.MOBILE_PORTRAIT -> 0.0f
+        }
+
+        val homeContentWidthFraction = (1.0f - homeSidebarWidthFraction).coerceIn(0.65f, 1.0f)
+
+        val homeGridColumns = when {
+            safeW >= 1080f -> 3
+            safeW >= 600f -> 2
+            else -> 1
+        }
+
         return ScreenFloatMetrics(
             screenWidthDp = safeW,
             screenHeightDp = safeH,
@@ -445,14 +616,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             topBarHeightFraction = topBarFraction,
             bottomDockWidthFraction = bottomDockWidthFraction,
             sideRailWidthFraction = sideRailWidthFraction,
-            inspectorWidthFraction = inspectorWidthFraction
+            inspectorWidthFraction = inspectorWidthFraction,
+            homeSidebarWidthFraction = homeSidebarWidthFraction,
+            homeContentWidthFraction = homeContentWidthFraction,
+            homeGridColumns = homeGridColumns
         )
     }
 
-    // Paper & Sketchbook Management
+    // --- Paper & Sheet Creation ---
+
     fun selectPaperTemplate(template: PaperTemplate) {
         _uiState.update { state ->
-            // If switching to dark slate and current ink is very dark, switch to bright chalk/amber
             val nextColor = if (template.isDark && state.activeColor == Color(0xFF18181B)) {
                 Color(0xFFF8FAFC)
             } else if (!template.isDark && state.activeColor == Color(0xFFF8FAFC)) {
@@ -469,19 +643,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         triggerAutoSave()
     }
 
-    fun loadSketchPage(page: SketchPageEntity) {
-        saveActivePageNow()
-        applyLoadedPage(page)
-        _uiState.update { it.copy(isSketchbookDrawerOpen = false) }
-    }
-
-    fun createNewSketchPage(title: String, category: String, template: PaperTemplate) {
-        saveActivePageNow()
+    fun createNewSketchPage(
+        title: String,
+        category: String,
+        template: PaperTemplate,
+        targetFolderId: Long? = _uiState.value.currentFolderId,
+        openImmediately: Boolean = true
+    ) {
+        if (_uiState.value.currentDestination == AppDestination.STUDIO_CANVAS) {
+            saveActivePageNow()
+        }
         viewModelScope.launch {
-            val cleanTitle = title.ifBlank { "Untitled Studio Sheet" }
+            val cleanTitle = title.trim().ifBlank { "Untitled Studio Sheet" }
             val defaultColor = if (template.isDark) Color(0xFFF4A261) else Color(0xFF18181B)
             val newId = repository.savePage(
                 id = 0L,
+                folderId = targetFolderId,
+                isFavorite = false,
                 title = cleanTitle,
                 categoryTag = category,
                 paperTemplate = template,
@@ -491,7 +669,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             )
             _uiState.update { state ->
                 state.copy(
+                    currentDestination = if (openImmediately) AppDestination.STUDIO_CANVAS else state.currentDestination,
                     activePageId = newId,
+                    activePageFolderId = targetFolderId,
+                    activePageIsFavorite = false,
                     activePageTitle = cleanTitle,
                     activePageCategory = category,
                     paperTemplate = template,
@@ -502,7 +683,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     zoomFloat = 1.0f,
                     panOffsetX = 0f,
                     panOffsetY = 0f,
-                    isSketchbookDrawerOpen = false
+                    isSketchbookDrawerOpen = false,
+                    isNewSheetDialogOpen = false
                 )
             }
         }
@@ -512,7 +694,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val pages = savedPages.value
             if (pages.size <= 1) {
-                // Clear instead of deleting the very last sheet
                 clearCanvas()
                 return@launch
             }
@@ -520,13 +701,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             if (_uiState.value.activePageId == pageId) {
                 val remaining = pages.firstOrNull { it.id != pageId }
                 if (remaining != null) {
-                    applyLoadedPage(remaining)
+                    applyLoadedPageOffThread(remaining)
                 }
             }
         }
     }
 
-    // Modal Toggles
+    // --- Modal Toggles ---
+
     fun setColorPickerOpen(open: Boolean) {
         _uiState.update { it.copy(isColorPickerOpen = open) }
     }
@@ -551,19 +733,34 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(isAddNoteDialogOpen = open) }
     }
 
+    fun setNewFolderDialogOpen(open: Boolean) {
+        _uiState.update { it.copy(isNewFolderDialogOpen = open) }
+    }
+
+    fun setNewSheetDialogOpen(open: Boolean) {
+        _uiState.update { it.copy(isNewSheetDialogOpen = open) }
+    }
+
+    fun setPageToMove(page: SketchPageEntity?) {
+        _uiState.update { it.copy(pageToMove = page) }
+    }
+
     private fun triggerAutoSave() {
         autoSaveJob?.cancel()
         autoSaveJob = viewModelScope.launch {
-            delay(350)
+            delay(450)
             saveActivePageNow()
         }
     }
 
     private fun saveActivePageNow() {
         val state = _uiState.value
+        if (state.activePageId <= 0L && state.strokes.isEmpty() && state.textNotes.isEmpty()) return
         viewModelScope.launch {
             val savedId = repository.savePage(
                 id = state.activePageId,
+                folderId = state.activePageFolderId,
+                isFavorite = state.activePageIsFavorite,
                 title = state.activePageTitle,
                 categoryTag = state.activePageCategory,
                 paperTemplate = state.paperTemplate,

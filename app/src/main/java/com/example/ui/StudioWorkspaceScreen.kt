@@ -1,7 +1,6 @@
 package com.example.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -34,11 +32,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.AutoFixNormal
 import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.ChangeHistory
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.CropSquare
@@ -50,10 +46,10 @@ import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.PanoramaFishEye
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
@@ -62,11 +58,8 @@ import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -116,15 +109,8 @@ fun StudioWorkspaceScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val savedPages by viewModel.savedPages.collectAsStateWithLifecycle()
 
-    // Handle system back if any floating studio modal or split mode is active
-    val anyModalOpen = state.isColorPickerOpen ||
-        state.isBrushSettingsOpen ||
-        state.isPaperPickerOpen ||
-        state.isScreenInspectorOpen ||
-        state.isSketchbookDrawerOpen ||
-        state.isAddNoteDialogOpen
-
-    BackHandler(enabled = anyModalOpen || state.coveragePreset == ScreenCoveragePreset.MAX_IMMERSION) {
+    // Back handler: close open modal, exit Max Immersion, or save & return to Home Page Explorer
+    BackHandler {
         when {
             state.isColorPickerOpen -> viewModel.setColorPickerOpen(false)
             state.isBrushSettingsOpen -> viewModel.setBrushSettingsOpen(false)
@@ -134,6 +120,7 @@ fun StudioWorkspaceScreen(
             state.isAddNoteDialogOpen -> viewModel.setAddNoteDialogOpen(false)
             state.coveragePreset == ScreenCoveragePreset.MAX_IMMERSION ->
                 viewModel.selectCoveragePreset(ScreenCoveragePreset.STUDIO_BALANCED)
+            else -> viewModel.navigateToHomeExplorer()
         }
     }
 
@@ -160,7 +147,7 @@ fun StudioWorkspaceScreen(
                     .weight(if (isSplitDockedOnWide) (1f - metrics.inspectorWidthFraction) else 1f)
                     .fillMaxHeight()
             ) {
-                // 1. Full-Potential Interactive Drawing & Writing Canvas with Pinch-to-Zoom
+                // 1. High-FPS Path-Cached Interactive Drawing & Writing Canvas with Pinch-to-Zoom
                 InteractiveDrawingCanvas(
                     strokes = state.strokes,
                     textNotes = state.textNotes,
@@ -190,6 +177,7 @@ fun StudioWorkspaceScreen(
                     canUndo = state.strokes.isNotEmpty(),
                     canRedo = state.redoStrokes.isNotEmpty(),
                     showMinimap = state.showMinimap,
+                    onNavigateHome = viewModel::navigateToHomeExplorer,
                     onOpenSketchbook = { viewModel.setSketchbookDrawerOpen(true) },
                     onOpenScreenInspector = { viewModel.setScreenInspectorOpen(true) },
                     onZoomIn = { viewModel.stepZoom(1.25f) },
@@ -235,7 +223,7 @@ fun StudioWorkspaceScreen(
                     )
                 }
 
-                // 4. Draggable / Percentage-Scaled Bottom Floating Studio Dock (Tools + Color Bar + Color Picker Trigger)
+                // 4. Draggable / Percentage-Scaled Bottom Floating Studio Dock
                 androidx.compose.animation.AnimatedVisibility(
                     visible = !isImmersion,
                     enter = fadeIn(),
@@ -265,7 +253,6 @@ fun StudioWorkspaceScreen(
                         onSelectColor = viewModel::selectColor,
                         onOpenColorPicker = { viewModel.setColorPickerOpen(true) },
                         onOpenBrushSettings = { viewModel.setBrushSettingsOpen(true) },
-                        onUpdateStrokeWidth = viewModel::updateStrokeWidth,
                         onDragDelta = { dx, dy ->
                             val nextX = currentXFrac + (dx / containerWidthPx)
                             val nextY = currentYFrac + (dy / containerHeightPx)
@@ -339,9 +326,18 @@ fun StudioWorkspaceScreen(
             SketchbookPagesDialog(
                 pages = savedPages,
                 activePageId = state.activePageId,
-                onSelectPage = viewModel::loadSketchPage,
-                onCreatePage = viewModel::createNewSketchPage,
+                onSelectPage = viewModel::openSheetInCanvas,
+                onCreatePage = { title, category, template ->
+                    viewModel.createNewSketchPage(
+                        title = title,
+                        category = category,
+                        template = template,
+                        targetFolderId = state.activePageFolderId,
+                        openImmediately = true
+                    )
+                },
                 onDeletePage = viewModel::deleteSketchPage,
+                onOpenHomeExplorer = viewModel::navigateToHomeExplorer,
                 onDismiss = { viewModel.setSketchbookDrawerOpen(false) }
             )
         }
@@ -387,6 +383,7 @@ private fun TopFloatingStudioHud(
     canUndo: Boolean,
     canRedo: Boolean,
     showMinimap: Boolean,
+    onNavigateHome: () -> Unit,
     onOpenSketchbook: () -> Unit,
     onOpenScreenInspector: () -> Unit,
     onZoomIn: () -> Unit,
@@ -417,6 +414,33 @@ private fun TopFloatingStudioHud(
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
+            // Home Page & Nested Folder Explorer Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VermilionAccent)
+                    .clickable { onNavigateHome() }
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                    .testTag("home_explorer_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = "Return to Home & Folders",
+                    tint = Color.White,
+                    modifier = Modifier.size(17.dp)
+                )
+                Text(
+                    text = "Home",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
             // Sketchbook Sheet Selector Pill
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -431,7 +455,7 @@ private fun TopFloatingStudioHud(
                 Icon(
                     imageVector = Icons.Default.FolderOpen,
                     contentDescription = "Open Sketchbook",
-                    tint = VermilionAccent,
+                    tint = AmberGold,
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
@@ -440,7 +464,7 @@ private fun TopFloatingStudioHud(
                     color = TextPrimaryDark,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.width(if (metrics.posture == DevicePosture.MOBILE_PORTRAIT) 105.dp else 150.dp)
+                    modifier = Modifier.width(if (metrics.posture == DevicePosture.MOBILE_PORTRAIT) 95.dp else 145.dp)
                 )
             }
 
@@ -686,7 +710,6 @@ private fun AdaptiveSideToolRail(
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 10.dp, horizontal = 8.dp)
         ) {
-            // Color Picker Orb
             Box(
                 modifier = Modifier
                     .size(42.dp)
@@ -697,7 +720,6 @@ private fun AdaptiveSideToolRail(
                     .testTag("rail_color_picker_orb")
             )
 
-            // Nib Width Pill
             Surface(
                 color = StudioObsidian,
                 shape = RoundedCornerShape(8.dp),
@@ -746,7 +768,6 @@ private fun FloatingBottomStudioDock(
     onSelectColor: (Color) -> Unit,
     onOpenColorPicker: () -> Unit,
     onOpenBrushSettings: () -> Unit,
-    onUpdateStrokeWidth: (Float) -> Unit,
     onDragDelta: (dx: Float, dy: Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -763,7 +784,6 @@ private fun FloatingBottomStudioDock(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Row 1: Drag Handle + Drawing & Writing Tools (if on Mobile Portrait) + Nib Size Slider
             if (showToolsInBottomDock) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -772,7 +792,6 @@ private fun FloatingBottomStudioDock(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                 ) {
-                    // Float Drag Handle
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -830,13 +849,11 @@ private fun FloatingBottomStudioDock(
                 }
             }
 
-            // Row 2: Color Picker Studio Button + Quick Color Swatches + Nib Calibration
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Full Color Picker Trigger Button (Rainbow Ring + Active Color Orb + HEX)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -870,7 +887,6 @@ private fun FloatingBottomStudioDock(
                     }
                 }
 
-                // Scrollable Quick Color Swatches
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -897,7 +913,6 @@ private fun FloatingBottomStudioDock(
                     }
                 }
 
-                // Nib Width & Opacity Calibrator Pill
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),

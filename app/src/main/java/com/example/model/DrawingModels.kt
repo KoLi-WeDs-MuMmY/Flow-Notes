@@ -1,6 +1,31 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import kotlin.math.max
+import kotlin.math.min
+
+enum class AppDestination {
+    HOME_EXPLORER,
+    STUDIO_CANVAS
+}
+
+enum class HomeFilterMode(val label: String) {
+    EXPLORER("Workspace Folders"),
+    FAVORITES("Starred Sheets"),
+    RECENTS("Recent Activity")
+}
+
+enum class FolderIconType(val label: String) {
+    FOLDER("Classic Folder"),
+    ARCHITECTURE("Drafting & CAD"),
+    NOTES("Handwritten Notes"),
+    PALETTE("Illustration & Art"),
+    GEOMETRY("Wireframes & Math"),
+    BOOKMARK("Collection")
+}
 
 enum class DrawingTool(
     val label: String,
@@ -103,12 +128,19 @@ enum class DevicePosture(
     TABLET_EXPANDED("Tablet Studio Deck", "TAB-XL")
 }
 
+@Immutable
 data class StrokePoint(
     val x: Float,
     val y: Float,
     val pressure: Float = 1.0f
 )
 
+/**
+ * High-performance stroke model that pre-computes and caches both its smoothed [Path]
+ * and its axis-aligned bounding box [bounds] once upon creation so Canvas [onDraw]
+ * never allocates or recalculates Bezier paths on every frame.
+ */
+@Immutable
 data class DrawnStroke(
     val id: String,
     val points: List<StrokePoint>,
@@ -116,8 +148,56 @@ data class DrawnStroke(
     val strokeWidth: Float,
     val alpha: Float,
     val tool: DrawingTool
-)
+) {
+    val cachedPath: Path by lazy(LazyThreadSafetyMode.NONE) {
+        buildCachedPath(points, tool)
+    }
+    val bounds: Rect = computeStrokeBounds(points, strokeWidth)
 
+    companion object {
+        fun buildCachedPath(points: List<StrokePoint>, tool: DrawingTool): Path {
+            val path = Path()
+            if (points.isEmpty() || tool.isShape) return path
+            val first = points.first()
+            path.moveTo(first.x, first.y)
+
+            if (points.size == 1) {
+                path.lineTo(first.x + 0.5f, first.y + 0.5f)
+                return path
+            }
+
+            for (i in 1 until points.size) {
+                val prev = points[i - 1]
+                val curr = points[i]
+                val midX = (prev.x + curr.x) * 0.5f
+                val midY = (prev.y + curr.y) * 0.5f
+                path.quadraticTo(prev.x, prev.y, midX, midY)
+            }
+            val last = points.last()
+            path.lineTo(last.x, last.y)
+            return path
+        }
+
+        fun computeStrokeBounds(points: List<StrokePoint>, strokeWidth: Float): Rect {
+            if (points.isEmpty()) return Rect.Zero
+            var minX = Float.POSITIVE_INFINITY
+            var minY = Float.POSITIVE_INFINITY
+            var maxX = Float.NEGATIVE_INFINITY
+            var maxY = Float.NEGATIVE_INFINITY
+            for (i in points.indices) {
+                val p = points[i]
+                if (p.x < minX) minX = p.x
+                if (p.y < minY) minY = p.y
+                if (p.x > maxX) maxX = p.x
+                if (p.y > maxY) maxY = p.y
+            }
+            val pad = max(strokeWidth * 1.6f, 12f)
+            return Rect(minX - pad, minY - pad, maxX + pad, maxY + pad)
+        }
+    }
+}
+
+@Immutable
 data class CanvasTextNote(
     val id: String,
     val text: String,
@@ -127,6 +207,7 @@ data class CanvasTextNote(
     val fontSizeSp: Float = 20f
 )
 
+@Immutable
 data class ScreenFloatMetrics(
     val screenWidthDp: Float,
     val screenHeightDp: Float,
@@ -137,7 +218,11 @@ data class ScreenFloatMetrics(
     val topBarHeightFraction: Float,
     val bottomDockWidthFraction: Float,
     val sideRailWidthFraction: Float,
-    val inspectorWidthFraction: Float
+    val inspectorWidthFraction: Float,
+    // Home Explorer Variable-Screen Float Allocations
+    val homeSidebarWidthFraction: Float,
+    val homeContentWidthFraction: Float,
+    val homeGridColumns: Int
 ) {
     val canvasCoveragePercent: Float
         get() = (effectiveCanvasCoverageFloat * 100f).coerceIn(50f, 99.5f)
@@ -160,5 +245,16 @@ object StudioPalettes {
         Color(0xFF4F46E5), // Indigo Night
         Color(0xFF57534E), // Warm Graphite
         Color(0xFFF8FAFC)  // Titanium White
+    )
+
+    val FolderAccentSwatches: List<Long> = listOf(
+        0xFFE85D04L, // Vermilion
+        0xFF2A9D8FL, // Teal Studio
+        0xFFF4A261L, // Amber Gold
+        0xFF3B82F6L, // Cobalt Blue
+        0xFF8B5CF6L, // Royal Violet
+        0xFF10B981L, // Emerald Green
+        0xFFEC4899L, // Rose Pink
+        0xFF64748BL  // Slate Metal
     )
 }

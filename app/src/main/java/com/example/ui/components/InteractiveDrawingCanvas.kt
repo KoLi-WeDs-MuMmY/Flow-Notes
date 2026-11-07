@@ -27,7 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -68,6 +70,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+private val CharcoalDashEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 3.5f), 0f)
+
 @Composable
 fun InteractiveDrawingCanvas(
     strokes: List<DrawnStroke>,
@@ -87,7 +91,10 @@ fun InteractiveDrawingCanvas(
     onRemoveTextNote: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activePoints = remember { mutableStateListOf<StrokePoint>() }
+    // Zero-allocation live stroke buffers (mutated in-place, invalidated via liveStrokeTick)
+    val livePointsBuffer = remember { ArrayList<StrokePoint>(256) }
+    val livePath = remember { Path() }
+    var liveStrokeTick by remember { mutableIntStateOf(0) }
     var lastTouchCanvasPoint by remember { mutableStateOf<Offset?>(null) }
     var canvasSizePx by remember { mutableStateOf(IntSize(1080, 1920)) }
 
@@ -112,7 +119,8 @@ fun InteractiveDrawingCanvas(
                 awaitEachGesture {
                     val firstDown = awaitFirstDown(requireUnconsumed = false)
                     var wasMultiTouch = false
-                    activePoints.clear()
+                    livePointsBuffer.clear()
+                    livePath.reset()
 
                     fun screenToCanvas(screenOffset: Offset): StrokePoint {
                         val cx = (screenOffset.x - currentPanX) / currentZoom
@@ -122,8 +130,10 @@ fun InteractiveDrawingCanvas(
 
                     if (!currentPanMode) {
                         val startPt = screenToCanvas(firstDown.position)
-                        activePoints.add(startPt)
+                        livePointsBuffer.add(startPt)
+                        livePath.moveTo(startPt.x, startPt.y)
                         lastTouchCanvasPoint = Offset(startPt.x, startPt.y)
+                        liveStrokeTick++
                     }
 
                     do {
@@ -132,16 +142,17 @@ fun InteractiveDrawingCanvas(
 
                         if (pressed.size >= 2 || currentPanMode) {
                             if (pressed.size >= 2 && !wasMultiTouch) {
-                                // Discard accidental single-finger start dot when 2nd finger lands for pinch-to-zoom
                                 wasMultiTouch = true
-                                activePoints.clear()
+                                livePointsBuffer.clear()
+                                livePath.reset()
                                 lastTouchCanvasPoint = null
+                                liveStrokeTick++
                             }
                             val zoomChange = if (pressed.size >= 2) event.calculateZoom() else 1f
                             val panChange = event.calculatePan()
                             val centroid = event.calculateCentroid(useCurrent = true)
                             val safeCentroid = if (centroid == Offset.Unspecified) {
-                                Offset(size.width / 2f, size.height / 2f)
+                                Offset(size.width * 0.5f, size.height * 0.5f)
                             } else {
                                 centroid
                             }
@@ -155,31 +166,39 @@ fun InteractiveDrawingCanvas(
                                     size.height.toFloat()
                                 )
                             }
-                            event.changes.forEach { change ->
+                            for (i in event.changes.indices) {
+                                val change = event.changes[i]
                                 if (change.positionChanged()) {
                                     change.consume()
                                 }
                             }
                         } else if (pressed.size == 1 && !wasMultiTouch) {
-                            val change = pressed.first()
+                            val change = pressed[0]
                             val pt = screenToCanvas(change.position)
                             lastTouchCanvasPoint = Offset(pt.x, pt.y)
 
                             if (currentTool.isShape) {
-                                if (activePoints.isEmpty()) {
-                                    activePoints.add(pt)
-                                } else if (activePoints.size == 1) {
-                                    activePoints.add(pt)
+                                if (livePointsBuffer.isEmpty()) {
+                                    livePointsBuffer.add(pt)
+                                } else if (livePointsBuffer.size == 1) {
+                                    livePointsBuffer.add(pt)
                                 } else {
-                                    activePoints[1] = pt
+                                    livePointsBuffer[1] = pt
                                 }
+                                liveStrokeTick++
                             } else {
-                                val prev = activePoints.lastOrNull()
-                                if (prev == null || hypot(pt.x - prev.x, pt.y - prev.y) >= (1.2f / currentZoom)) {
-                                    // Velocity-based synthetic pressure for Fountain Nib calligraphy feel
-                                    val dist = if (prev != null) hypot(pt.x - prev.x, pt.y - prev.y) else 0f
-                                    val pressure = (1.25f - (dist * 0.015f)).coerceIn(0.45f, 1.35f)
-                                    activePoints.add(pt.copy(pressure = pressure))
+                                val prev = livePointsBuffer.lastOrNull()
+                                val minStep = 1.8f / currentZoom
+                                if (prev == null || hypot(pt.x - prev.x, pt.y - prev.y) >= minStep) {
+                                    livePointsBuffer.add(pt)
+                                    if (prev != null) {
+                                        val midX = (prev.x + pt.x) * 0.5f
+                                        val midY = (prev.y + pt.y) * 0.5f
+                                        livePath.quadraticTo(prev.x, prev.y, midX, midY)
+                                    } else {
+                                        livePath.moveTo(pt.x, pt.y)
+                                    }
+                                    liveStrokeTick++
                                 }
                             }
                             if (change.positionChanged()) {
@@ -188,56 +207,76 @@ fun InteractiveDrawingCanvas(
                         }
                     } while (event.changes.any { it.pressed })
 
-                    if (!wasMultiTouch && !currentPanMode && activePoints.isNotEmpty()) {
-                        val finalPoints = if (activePoints.size == 1) {
-                            // Single tap dot
-                            val p = activePoints.first()
+                    if (!wasMultiTouch && !currentPanMode && livePointsBuffer.isNotEmpty()) {
+                        val finalPoints = if (livePointsBuffer.size == 1) {
+                            val p = livePointsBuffer[0]
                             listOf(p, p.copy(x = p.x + 0.5f, y = p.y + 0.5f))
                         } else {
-                            activePoints.toList()
+                            ArrayList(livePointsBuffer)
                         }
                         currentCommitCallback(finalPoints)
                     }
-                    activePoints.clear()
+                    livePointsBuffer.clear()
+                    livePath.reset()
                     lastTouchCanvasPoint = null
+                    liveStrokeTick++
                 }
             }
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer()
+        ) {
+            // Read liveStrokeTick inside DrawScope so only the Canvas draw phase invalidates during finger drag
+            val tick = liveStrokeTick
+            if (tick < 0) return@Canvas
+
+            val visibleRect = Rect(
+                left = (-panOffsetX / zoomFloat) - 96f,
+                top = (-panOffsetY / zoomFloat) - 96f,
+                right = ((size.width - panOffsetX) / zoomFloat) + 96f,
+                bottom = ((size.height - panOffsetY) / zoomFloat) + 96f
+            )
+
             withTransform({
                 translate(left = panOffsetX, top = panOffsetY)
                 scale(scaleX = zoomFloat, scaleY = zoomFloat, pivot = Offset.Zero)
             }) {
-                // 1. Draw Paper Template Grid / Ruling in Canvas Space
-                drawPaperTemplateGrid(
+                // 1. Draw Adaptive LOD Paper Template Grid
+                drawPaperTemplateGridLod(
                     template = paperTemplate,
                     gridColor = gridColor,
                     zoomFloat = zoomFloat,
-                    panOffsetX = panOffsetX,
-                    panOffsetY = panOffsetY
+                    visibleRect = visibleRect
                 )
 
-                // 2. Draw Committed Strokes
-                strokes.forEach { stroke ->
-                    drawStudioStroke(
-                        points = stroke.points,
-                        color = ColorMath.argbLongToColor(stroke.colorArgb),
-                        strokeWidth = stroke.strokeWidth,
-                        alpha = stroke.alpha,
-                        tool = stroke.tool,
-                        paperBgColor = backgroundColor
-                    )
+                // 2. Draw Committed Strokes using O(1) Cached Paths + Viewport Frustum Culling
+                for (i in strokes.indices) {
+                    val stroke = strokes[i]
+                    if (stroke.bounds.overlaps(visibleRect)) {
+                        drawCachedStudioStroke(
+                            cachedPath = stroke.cachedPath,
+                            points = stroke.points,
+                            color = ColorMath.argbLongToColor(stroke.colorArgb),
+                            strokeWidth = stroke.strokeWidth,
+                            alpha = stroke.alpha,
+                            tool = stroke.tool,
+                            paperBgColor = backgroundColor
+                        )
+                    }
                 }
 
-                // 3. Draw Active Live Stroke
-                if (activePoints.isNotEmpty()) {
+                // 3. Draw Active In-Progress Stroke (Zero-allocation livePath)
+                if (livePointsBuffer.isNotEmpty()) {
                     val liveColor = if (selectedTool == DrawingTool.ERASER) {
                         backgroundColor
                     } else {
                         activeColor
                     }
-                    drawStudioStroke(
-                        points = activePoints,
+                    drawCachedStudioStroke(
+                        cachedPath = livePath,
+                        points = livePointsBuffer,
                         color = liveColor,
                         strokeWidth = strokeWidth,
                         alpha = if (selectedTool == DrawingTool.ERASER) 1f else strokeAlpha,
@@ -246,11 +285,11 @@ fun InteractiveDrawingCanvas(
                     )
                 }
 
-                // 4. Draw Eraser Ring Indicator if erasing
+                // 4. Draw Eraser Ring Reticle if erasing
                 if (selectedTool == DrawingTool.ERASER && lastTouchCanvasPoint != null) {
                     drawCircle(
                         color = VermilionAccent.copy(alpha = 0.85f),
-                        radius = strokeWidth / 2f,
+                        radius = strokeWidth * 0.5f,
                         center = lastTouchCanvasPoint!!,
                         style = Stroke(width = 1.8f / zoomFloat)
                     )
@@ -258,7 +297,7 @@ fun InteractiveDrawingCanvas(
             }
         }
 
-        // 5. Render Movable / Deletable Typography & Handwriting Callout Notes in Transformed Coordinates
+        // 5. Render Movable / Deletable Typography & Handwriting Callout Notes
         textNotes.forEach { note ->
             val screenX = (note.x * zoomFloat + panOffsetX).roundToInt()
             val screenY = (note.y * zoomFloat + panOffsetY).roundToInt()
@@ -306,7 +345,7 @@ fun InteractiveDrawingCanvas(
             }
         }
 
-        // 6. Floating Minimap / Viewport Radar Overlay (Bottom-Left or Top-Right safe spot)
+        // 6. Floating Minimap / Viewport Radar Overlay
         if (showMinimap) {
             CanvasMinimapOverlay(
                 strokes = strokes,
@@ -324,23 +363,27 @@ fun InteractiveDrawingCanvas(
     }
 }
 
-private fun DrawScope.drawPaperTemplateGrid(
+private fun DrawScope.drawPaperTemplateGridLod(
     template: PaperTemplate,
     gridColor: Color,
     zoomFloat: Float,
-    panOffsetX: Float,
-    panOffsetY: Float
+    visibleRect: Rect
 ) {
-    // Visible region in canvas coordinates
-    val startX = (-panOffsetX / zoomFloat) - 200f
-    val startY = (-panOffsetY / zoomFloat) - 200f
-    val endX = ((size.width - panOffsetX) / zoomFloat) + 200f
-    val endY = ((size.height - panOffsetY) / zoomFloat) + 200f
+    val startX = visibleRect.left
+    val startY = visibleRect.top
+    val endX = visibleRect.right
+    val endY = visibleRect.bottom
+
+    // Adaptive Level-of-Detail (LOD) multiplier so zoomed-out views never draw excessive lines
+    val lodMultiplier = when {
+        zoomFloat < 0.40f -> 4f
+        zoomFloat < 0.72f -> 2f
+        else -> 1f
+    }
 
     when (template) {
         PaperTemplate.WARM_ARCHIVAL, PaperTemplate.DARK_SLATE -> {
-            // Subtle architectural crosshairs at 160px intervals
-            val step = 160f
+            val step = 160f * lodMultiplier
             val firstX = (startX / step).toInt() * step
             val firstY = (startY / step).toInt() * step
             var x = firstX
@@ -366,8 +409,7 @@ private fun DrawScope.drawPaperTemplateGrid(
         }
 
         PaperTemplate.RULED_NOTEBOOK -> {
-            // College-ruled horizontal writing lines + vertical crimson margin line
-            val lineSpacing = 42f
+            val lineSpacing = 42f * lodMultiplier
             val firstY = (startY / lineSpacing).toInt() * lineSpacing
             var y = firstY
             while (y <= endY) {
@@ -379,7 +421,6 @@ private fun DrawScope.drawPaperTemplateGrid(
                 )
                 y += lineSpacing
             }
-            // Vertical Red Margin Line at X = 115f
             if (115f in startX..endX) {
                 drawLine(
                     color = Color(0xFFEF4444).copy(alpha = 0.55f),
@@ -397,7 +438,7 @@ private fun DrawScope.drawPaperTemplateGrid(
         }
 
         PaperTemplate.DOT_MATRIX -> {
-            val step = 36f
+            val step = 44f * lodMultiplier
             val firstX = (startX / step).toInt() * step
             val firstY = (startY / step).toInt() * step
             var x = firstX
@@ -416,7 +457,7 @@ private fun DrawScope.drawPaperTemplateGrid(
         }
 
         PaperTemplate.GRAPH_ENGINEERING -> {
-            val minorStep = 28f
+            val minorStep = 32f * lodMultiplier
             val firstX = (startX / minorStep).toInt() * minorStep
             val firstY = (startY / minorStep).toInt() * minorStep
             var x = firstX
@@ -446,7 +487,7 @@ private fun DrawScope.drawPaperTemplateGrid(
         }
 
         PaperTemplate.ISOMETRIC_DRAFT -> {
-            val step = 48f
+            val step = 48f * lodMultiplier
             val firstY = (startY / step).toInt() * step
             var y = firstY
             while (y <= endY) {
@@ -473,7 +514,8 @@ private fun DrawScope.drawPaperTemplateGrid(
     }
 }
 
-private fun DrawScope.drawStudioStroke(
+private fun DrawScope.drawCachedStudioStroke(
+    cachedPath: Path,
     points: List<StrokePoint>,
     color: Color,
     strokeWidth: Float,
@@ -531,115 +573,64 @@ private fun DrawScope.drawStudioStroke(
             )
         }
 
+        DrawingTool.CHISEL_MARKER -> {
+            drawPath(
+                path = cachedPath,
+                color = paintColor,
+                style = Stroke(
+                    width = strokeWidth,
+                    cap = StrokeCap.Square,
+                    join = StrokeJoin.Bevel
+                )
+            )
+        }
+
+        DrawingTool.ART_BRUSH -> {
+            drawPath(
+                path = cachedPath,
+                color = paintColor.copy(alpha = (paintColor.alpha * 0.35f).coerceAtLeast(0.05f)),
+                style = Stroke(
+                    width = strokeWidth * 1.38f,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+            )
+            drawPath(
+                path = cachedPath,
+                color = paintColor,
+                style = Stroke(
+                    width = strokeWidth * 0.85f,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+            )
+        }
+
+        DrawingTool.CHARCOAL -> {
+            drawPath(
+                path = cachedPath,
+                color = paintColor,
+                style = Stroke(
+                    width = strokeWidth,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                    pathEffect = CharcoalDashEffect
+                )
+            )
+        }
+
         else -> {
-            val path = buildSmoothPath(points)
-            when (tool) {
-                DrawingTool.CHISEL_MARKER -> {
-                    drawPath(
-                        path = path,
-                        color = paintColor,
-                        style = Stroke(
-                            width = strokeWidth,
-                            cap = StrokeCap.Square,
-                            join = StrokeJoin.Bevel
-                        )
-                    )
-                }
-
-                DrawingTool.ART_BRUSH -> {
-                    // Outer soft glaze + inner saturated core
-                    drawPath(
-                        path = path,
-                        color = paintColor.copy(alpha = (paintColor.alpha * 0.35f).coerceAtLeast(0.05f)),
-                        style = Stroke(
-                            width = strokeWidth * 1.38f,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                    drawPath(
-                        path = path,
-                        color = paintColor,
-                        style = Stroke(
-                            width = strokeWidth * 0.85f,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
-
-                DrawingTool.CHARCOAL -> {
-                    drawPath(
-                        path = path,
-                        color = paintColor,
-                        style = Stroke(
-                            width = strokeWidth,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(strokeWidth * 1.4f, strokeWidth * 0.3f), 0f)
-                        )
-                    )
-                    drawPath(
-                        path = path,
-                        color = paintColor.copy(alpha = paintColor.alpha * 0.65f),
-                        style = Stroke(
-                            width = strokeWidth * 0.7f,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
-
-                DrawingTool.FOUNTAIN_PEN -> {
-                    // Main calligraphy body + crisp nib edge shadow for authentic fountain ink feel
-                    drawPath(
-                        path = path,
-                        color = paintColor,
-                        style = Stroke(
-                            width = strokeWidth,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
-
-                else -> {
-                    drawPath(
-                        path = path,
-                        color = paintColor,
-                        style = Stroke(
-                            width = strokeWidth,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
-            }
+            drawPath(
+                path = cachedPath,
+                color = paintColor,
+                style = Stroke(
+                    width = strokeWidth,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+            )
         }
     }
-}
-
-private fun buildSmoothPath(points: List<StrokePoint>): Path {
-    val path = Path()
-    if (points.isEmpty()) return path
-    val first = points.first()
-    path.moveTo(first.x, first.y)
-
-    if (points.size == 1) {
-        path.lineTo(first.x + 0.5f, first.y + 0.5f)
-        return path
-    }
-
-    for (i in 1 until points.size) {
-        val prev = points[i - 1]
-        val curr = points[i]
-        val midX = (prev.x + curr.x) / 2f
-        val midY = (prev.y + curr.y) / 2f
-        path.quadraticTo(prev.x, prev.y, midX, midY)
-    }
-    val last = points.last()
-    path.lineTo(last.x, last.y)
-    return path
 }
 
 @Composable
@@ -675,8 +666,8 @@ private fun CanvasMinimapOverlay(
                 val scaleX = size.width / worldW
                 val scaleY = size.height / worldH
 
-                // Draw miniature strokes
-                strokes.forEach { s ->
+                for (i in strokes.indices) {
+                    val s = strokes[i]
                     if (s.points.size >= 2) {
                         val p0 = s.points.first()
                         val p1 = s.points.last()
@@ -695,7 +686,6 @@ private fun CanvasMinimapOverlay(
                     }
                 }
 
-                // Draw current viewport frame in minimap
                 val viewLeft = ((-panOffsetX / zoomFloat) + worldW * 0.2f) * scaleX
                 val viewTop = ((-panOffsetY / zoomFloat) + worldH * 0.2f) * scaleY
                 val viewW = (viewportWidthPx / zoomFloat) * scaleX

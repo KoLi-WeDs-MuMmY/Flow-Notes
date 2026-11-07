@@ -4,9 +4,11 @@ import androidx.compose.ui.graphics.Color
 import com.example.data.SketchRepository
 import com.example.model.DrawingTool
 import com.example.model.DrawnStroke
+import com.example.model.FolderIconType
 import com.example.model.StrokePoint
 import com.example.util.ColorMath
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,7 +29,7 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun strokeSerialization_roundTripPreservesFloats() {
+    fun strokeSerialization_roundTripAndCachedBounds() {
         val original = listOf(
             DrawnStroke(
                 id = "stroke-1",
@@ -38,11 +40,13 @@ class ExampleUnitTest {
                 tool = DrawingTool.FOUNTAIN_PEN
             )
         )
+        assertFalse(original.first().bounds.isEmpty)
         val payload = SketchRepository.serializeStrokes(original)
         val restored = SketchRepository.deserializeStrokes(payload)
         assertEquals(1, restored.size)
         assertEquals(DrawingTool.FOUNTAIN_PEN, restored.first().tool)
         assertEquals(5.5f, restored.first().strokeWidth, 0.001f)
         assertTrue(restored.first().points.size == 2)
+        assertTrue(FolderIconType.entries.size >= 6)
     }
 }

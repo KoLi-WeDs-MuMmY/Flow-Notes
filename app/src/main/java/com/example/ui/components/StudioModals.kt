@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,16 +18,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Architecture
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,6 +55,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -59,11 +72,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
+import com.example.data.FolderEntity
 import com.example.data.SketchPageEntity
 import com.example.model.DrawingTool
+import com.example.model.FolderIconType
 import com.example.model.PaperTemplate
 import com.example.model.ScreenCoveragePreset
 import com.example.model.ScreenFloatMetrics
+import com.example.model.StudioPalettes
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.StudioBorder
 import com.example.ui.theme.StudioCharcoal
@@ -73,7 +89,536 @@ import com.example.ui.theme.TealStudio
 import com.example.ui.theme.TextPrimaryDark
 import com.example.ui.theme.TextSecondaryDark
 import com.example.ui.theme.VermilionAccent
+import com.example.util.ColorMath
 import kotlin.math.roundToInt
+
+fun iconForFolderType(iconName: String): ImageVector {
+    return when (runCatching { FolderIconType.valueOf(iconName) }.getOrDefault(FolderIconType.FOLDER)) {
+        FolderIconType.FOLDER -> Icons.Default.Folder
+        FolderIconType.ARCHITECTURE -> Icons.Default.Architecture
+        FolderIconType.NOTES -> Icons.Default.MenuBook
+        FolderIconType.PALETTE -> Icons.Default.Palette
+        FolderIconType.GEOMETRY -> Icons.Default.Category
+        FolderIconType.BOOKMARK -> Icons.Default.Bookmark
+    }
+}
+
+@Composable
+fun CreateSubfolderDialog(
+    parentFolderName: String,
+    onCreateFolder: (name: String, colorArgb: Long, iconType: FolderIconType) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var folderName by remember { mutableStateOf("") }
+    var selectedColorArgb by remember { mutableLongStateOf(StudioPalettes.FolderAccentSwatches.first()) }
+    var selectedIconType by remember { mutableStateOf(FolderIconType.FOLDER) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = StudioCharcoal,
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 12.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, StudioBorder, RoundedCornerShape(24.dp))
+                .testTag("create_subfolder_dialog")
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = null,
+                            tint = ColorMath.argbLongToColor(selectedColorArgb)
+                        )
+                        Column {
+                            Text(
+                                text = "New Nested Folder",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = "Location: $parentFolderName",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AmberGold
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextPrimaryDark
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it },
+                    label = { Text("Folder Name (e.g. Semester 2, Floor Plans)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = VermilionAccent,
+                        unfocusedBorderColor = StudioBorder
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("folder_name_input")
+                )
+
+                // Folder Pigment Swatches
+                Text(
+                    text = "FOLDER ACCENT COLOR",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    StudioPalettes.FolderAccentSwatches.forEach { argb ->
+                        val isSelected = argb == selectedColorArgb
+                        val c = ColorMath.argbLongToColor(argb)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .border(
+                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.3f),
+                                    shape = CircleShape
+                                )
+                                .clickable { selectedColorArgb = argb }
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected Color",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Folder Icon Style
+                Text(
+                    text = "FOLDER ICON BADGE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    FolderIconType.entries.forEach { iconType ->
+                        val isSelected = iconType == selectedIconType
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) StudioSlate else StudioObsidian)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) VermilionAccent else StudioBorder,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { selectedIconType = iconType }
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = iconForFolderType(iconType.name),
+                                contentDescription = iconType.label,
+                                tint = if (isSelected) ColorMath.argbLongToColor(selectedColorArgb) else TextSecondaryDark,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = iconType.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextPrimaryDark
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = StudioSlate)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            onCreateFolder(
+                                folderName.ifBlank { "New Studio Folder" },
+                                selectedColorArgb,
+                                selectedIconType
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = VermilionAccent),
+                        modifier = Modifier.testTag("confirm_create_folder_button")
+                    ) {
+                        Text("Create Folder")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CreateSheetDialog(
+    currentFolderName: String,
+    onCreateSheet: (title: String, category: String, template: PaperTemplate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var sheetTitle by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Drawing & Notes") }
+    var selectedTemplate by remember { mutableStateOf(PaperTemplate.DOT_MATRIX) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = StudioCharcoal,
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 12.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, StudioBorder, RoundedCornerShape(24.dp))
+                .testTag("create_sheet_dialog")
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "New Studio Sheet",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = TextPrimaryDark
+                        )
+                        Text(
+                            text = "Folder: $currentFolderName",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TealStudio
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextPrimaryDark
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = sheetTitle,
+                    onValueChange = { sheetTitle = it },
+                    label = { Text("Sheet Title (e.g. Lecture Notes, Perspective Sketch)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = VermilionAccent,
+                        unfocusedBorderColor = StudioBorder
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("new_sheet_title_input")
+                )
+
+                Text(
+                    text = "CATEGORY TAG",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    listOf("Drawing & Notes", "Handwriting", "Architecture", "Blueprint", "Color Study").forEach { cat ->
+                        val isCat = selectedCategory == cat
+                        Surface(
+                            color = if (isCat) VermilionAccent else StudioObsidian,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .border(1.dp, if (isCat) VermilionAccent else StudioBorder, RoundedCornerShape(8.dp))
+                                .clickable { selectedCategory = cat }
+                        ) {
+                            Text(
+                                text = cat,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "PAPER RULING TEMPLATE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondaryDark
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PaperTemplate.entries.take(4).forEach { template ->
+                        val selected = template == selectedTemplate
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) StudioSlate else StudioObsidian)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected) VermilionAccent else StudioBorder,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { selectedTemplate = template }
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(template.backgroundColorHex))
+                                    .border(1.dp, Color(template.lineColorHex), RoundedCornerShape(6.dp))
+                            )
+                            Text(
+                                text = template.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimaryDark,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (selected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = VermilionAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = StudioSlate)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            onCreateSheet(
+                                sheetTitle.ifBlank { "Untitled Studio Sheet" },
+                                selectedCategory,
+                                selectedTemplate
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = VermilionAccent),
+                        modifier = Modifier.testTag("confirm_create_sheet_button")
+                    ) {
+                        Text("Create & Open")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MoveSheetToFolderDialog(
+    page: SketchPageEntity,
+    allFolders: List<FolderEntity>,
+    onMoveToFolder: (targetFolderId: Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Build flattened hierarchical list with indentation depth
+    val flattenedFolders = remember(allFolders) {
+        val result = ArrayList<Pair<FolderEntity, Int>>()
+        val childrenMap = allFolders.groupBy { it.parentFolderId }
+        fun visit(parentId: Long?, depth: Int) {
+            childrenMap[parentId]?.forEach { folder ->
+                result.add(folder to depth)
+                visit(folder.id, depth + 1)
+            }
+        }
+        visit(null, 0)
+        result
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            color = StudioCharcoal,
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 12.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.72f)
+                .border(1.dp, StudioBorder, RoundedCornerShape(24.dp))
+                .testTag("move_sheet_dialog")
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DriveFileMove,
+                            contentDescription = null,
+                            tint = VermilionAccent
+                        )
+                        Column {
+                            Text(
+                                text = "Move Sheet to Folder",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimaryDark
+                            )
+                            Text(
+                                text = page.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AmberGold
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextPrimaryDark
+                        )
+                    }
+                }
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // Option 0: Root Workspace
+                    item {
+                        val isAtRoot = page.folderId == null
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isAtRoot) StudioSlate else StudioObsidian)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isAtRoot) TealStudio else StudioBorder,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onMoveToFolder(null) }
+                                .padding(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = null,
+                                tint = TealStudio
+                            )
+                            Text(
+                                text = "Root Studio Workspace",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimaryDark,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isAtRoot) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Current Folder",
+                                    tint = TealStudio
+                                )
+                            }
+                        }
+                    }
+
+                    items(flattenedFolders, key = { it.first.id }) { (folder, depth) ->
+                        val isCurrent = page.folderId == folder.id
+                        val folderColor = ColorMath.argbLongToColor(folder.colorArgb)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = (depth * 18).dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isCurrent) StudioSlate else StudioObsidian)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isCurrent) folderColor else StudioBorder,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onMoveToFolder(folder.id) }
+                                .padding(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = iconForFolderType(folder.iconName),
+                                contentDescription = null,
+                                tint = folderColor
+                            )
+                            Text(
+                                text = folder.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimaryDark,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isCurrent) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Current Folder",
+                                    tint = folderColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun ScreenCoverageInspectorDialog(
@@ -205,10 +750,9 @@ fun ScreenCoverageInspectorDialog(
                             )
                             Text(
                                 text = String.format(
-                                    "Dock Float: (%.2ff, %.2ff) • Zoom: %.2fx",
-                                    floatingXFraction,
-                                    floatingYFraction,
-                                    zoomFloat
+                                    "Home Split: %.2ff / %.2ff",
+                                    metrics.homeSidebarWidthFraction,
+                                    metrics.homeContentWidthFraction
                                 ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondaryDark
@@ -334,13 +878,9 @@ fun SketchbookPagesDialog(
     onSelectPage: (SketchPageEntity) -> Unit,
     onCreatePage: (title: String, category: String, template: PaperTemplate) -> Unit,
     onDeletePage: (Long) -> Unit,
+    onOpenHomeExplorer: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var newSheetTitle by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Drawing & Notes") }
-    var selectedTemplate by remember { mutableStateOf(PaperTemplate.DOT_MATRIX) }
-    var showCreateForm by remember { mutableStateOf(false) }
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -356,11 +896,10 @@ fun SketchbookPagesDialog(
                 .testTag("sketchbook_dialog")
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                // Studio Hero Banner Image
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(115.dp)
+                        .height(110.dp)
                         .clip(RoundedCornerShape(16.dp))
                 ) {
                     Image(
@@ -383,12 +922,12 @@ fun SketchbookPagesDialog(
                     ) {
                         Column {
                             Text(
-                                text = "Studio Sketchbook & Notes",
+                                text = "Quick Sheet Switcher",
                                 style = MaterialTheme.typography.headlineMedium,
                                 color = Color.White
                             )
                             Text(
-                                text = "${pages.size} Multi-Screen Sheets • Auto-Saved Locally",
+                                text = "${pages.size} Sheets • Tap Home Explorer for Nested Folders",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AmberGold
                             )
@@ -410,103 +949,50 @@ fun SketchbookPagesDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (showCreateForm) {
-                    Surface(
-                        color = StudioObsidian,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, VermilionAccent, RoundedCornerShape(16.dp))
-                            .padding(14.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = "CREATE NEW DRAWING / WRITING SHEET",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = VermilionAccent
-                            )
-                            OutlinedTextField(
-                                value = newSheetTitle,
-                                onValueChange = { newSheetTitle = it },
-                                label = { Text("Sheet Title (e.g. Tablet Concept, Lecture Notes)") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = VermilionAccent,
-                                    unfocusedBorderColor = StudioBorder
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("new_sheet_title_input")
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("Drawing", "Handwriting", "Blueprint").forEach { cat ->
-                                    val isCat = selectedCategory == cat
-                                    Surface(
-                                        color = if (isCat) VermilionAccent else StudioSlate,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.clickable { selectedCategory = cat }
-                                    ) {
-                                        Text(
-                                            text = cat,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                Button(
-                                    onClick = { showCreateForm = false },
-                                    colors = ButtonDefaults.buttonColors(containerColor = StudioSlate)
-                                ) {
-                                    Text("Cancel")
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        onCreatePage(
-                                            newSheetTitle.ifBlank { "Studio Sheet #${pages.size + 1}" },
-                                            selectedCategory,
-                                            selectedTemplate
-                                        )
-                                        showCreateForm = false
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = VermilionAccent),
-                                    modifier = Modifier.testTag("confirm_create_sheet_button")
-                                ) {
-                                    Text("Create Sheet")
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Button(
-                        onClick = { showCreateForm = true },
+                        onClick = onOpenHomeExplorer,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = TealStudio,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Home, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Home & Folders", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            onCreatePage(
+                                "Studio Sheet #${pages.size + 1}",
+                                "Drawing & Notes",
+                                PaperTemplate.DOT_MATRIX
+                            )
+                        },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = VermilionAccent,
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .weight(1f)
                             .height(48.dp)
-                            .testTag("open_new_sheet_form_button")
                     ) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "New Drawing or Writing Sheet",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("New Sheet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -554,7 +1040,7 @@ fun SketchbookPagesDialog(
                                         color = TextPrimaryDark
                                     )
                                     Text(
-                                        text = "${page.categoryTag} • ${page.strokeCount} strokes • Zoom ${String.format("%.1fx", page.lastZoomFloat)}",
+                                        text = "${page.categoryTag} • ${page.strokeCount} strokes",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = TextSecondaryDark
                                     )
@@ -732,7 +1218,6 @@ fun BrushAndNibSettingsDialog(
                     }
                 }
 
-                // Stroke Width Float Slider
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -761,7 +1246,6 @@ fun BrushAndNibSettingsDialog(
                     )
                 }
 
-                // Opacity Float Slider
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -790,7 +1274,6 @@ fun BrushAndNibSettingsDialog(
                     )
                 }
 
-                // Quick Nib Presets
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

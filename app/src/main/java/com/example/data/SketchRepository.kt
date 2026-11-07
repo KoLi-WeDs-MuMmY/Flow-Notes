@@ -3,57 +3,191 @@ package com.example.data
 import com.example.model.CanvasTextNote
 import com.example.model.DrawingTool
 import com.example.model.DrawnStroke
+import com.example.model.FolderIconType
 import com.example.model.PaperTemplate
 import com.example.model.StrokePoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import kotlin.math.cos
 import kotlin.math.sin
 
-class SketchRepository(private val dao: SketchPageDao) {
+class SketchRepository(
+    private val pageDao: SketchPageDao,
+    private val folderDao: FolderDao
+) {
 
-    val allPages: Flow<List<SketchPageEntity>> = dao.observeAllPages()
+    val allPages: Flow<List<SketchPageEntity>> = pageDao.observeAllPages()
+    val allFolders: Flow<List<FolderEntity>> = folderDao.observeAllFolders()
 
-    suspend fun getPageById(id: Long): SketchPageEntity? = dao.getPageById(id)
+    suspend fun getPageById(id: Long): SketchPageEntity? = withContext(Dispatchers.IO) {
+        pageDao.getPageById(id)
+    }
 
-    suspend fun getPageCount(): Int = dao.getPageCount()
+    suspend fun getPageCount(): Int = withContext(Dispatchers.IO) {
+        pageDao.getPageCount()
+    }
+
+    suspend fun createFolder(
+        name: String,
+        parentFolderId: Long?,
+        colorArgb: Long,
+        iconType: FolderIconType
+    ): Long = withContext(Dispatchers.IO) {
+        val cleanName = name.trim().ifBlank { "New Studio Folder" }
+        folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = parentFolderId,
+                name = cleanName,
+                colorArgb = colorArgb,
+                iconName = iconType.name,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun updateFolder(
+        folder: FolderEntity,
+        newName: String,
+        newColorArgb: Long,
+        newIconType: FolderIconType
+    ) = withContext(Dispatchers.IO) {
+        folderDao.upsertFolder(
+            folder.copy(
+                name = newName.trim().ifBlank { folder.name },
+                colorArgb = newColorArgb,
+                iconName = newIconType.name,
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    /**
+     * Deletes a folder and safely re-parents its child subfolders and sheets
+     * to the deleted folder's parent (or Root if null) so no user work is lost.
+     */
+    suspend fun deleteFolderSafely(folderId: Long) = withContext(Dispatchers.IO) {
+        val folder = folderDao.getFolderById(folderId) ?: return@withContext
+        val parentId = folder.parentFolderId
+        folderDao.reparentChildFolders(oldParentId = folderId, newParentId = parentId)
+        pageDao.movePagesFromFolder(oldFolderId = folderId, newFolderId = parentId)
+        folderDao.deleteFolderById(folderId)
+    }
 
     suspend fun savePage(
         id: Long,
+        folderId: Long?,
+        isFavorite: Boolean,
         title: String,
         categoryTag: String,
         paperTemplate: PaperTemplate,
         strokes: List<DrawnStroke>,
         textNotes: List<CanvasTextNote>,
         zoomFloat: Float
-    ): Long {
+    ): Long = withContext(Dispatchers.Default) {
+        val serializedStrokes = serializeStrokes(strokes)
+        val serializedNotes = serializeTextNotes(textNotes)
         val entity = SketchPageEntity(
             id = id,
+            folderId = folderId,
+            isFavorite = isFavorite,
             title = title,
             categoryTag = categoryTag,
             paperTemplateName = paperTemplate.name,
-            strokesPayload = serializeStrokes(strokes),
-            textNotesPayload = serializeTextNotes(textNotes),
+            strokesPayload = serializedStrokes,
+            textNotesPayload = serializedNotes,
             strokeCount = strokes.size,
             lastZoomFloat = zoomFloat,
             updatedAtMillis = System.currentTimeMillis()
         )
-        return dao.upsertPage(entity)
+        withContext(Dispatchers.IO) {
+            pageDao.upsertPage(entity)
+        }
     }
 
-    suspend fun deletePage(id: Long) {
-        dao.deletePageById(id)
+    suspend fun movePageToFolder(pageId: Long, targetFolderId: Long?) = withContext(Dispatchers.IO) {
+        pageDao.movePageToFolder(pageId, targetFolderId)
     }
 
-    suspend fun seedStarterPagesIfEmpty(): Long {
-        if (dao.getPageCount() > 0) return -1L
+    suspend fun togglePageFavorite(page: SketchPageEntity) = withContext(Dispatchers.IO) {
+        pageDao.setPageFavorite(page.id, !page.isFavorite)
+    }
 
-        // Starter Sheet 1: Architectural & Color Study (rich visual starter strokes + handwriting)
+    suspend fun duplicatePage(page: SketchPageEntity): Long = withContext(Dispatchers.IO) {
+        val copyEntity = page.copy(
+            id = 0L,
+            title = "${page.title} (Copy)",
+            updatedAtMillis = System.currentTimeMillis()
+        )
+        pageDao.upsertPage(copyEntity)
+    }
+
+    suspend fun deletePage(id: Long) = withContext(Dispatchers.IO) {
+        pageDao.deletePageById(id)
+    }
+
+    suspend fun seedStarterWorkspaceIfEmpty(): Long = withContext(Dispatchers.IO) {
+        if (pageDao.getPageCount() > 0) return@withContext -1L
+
+        // 1. Create Top-Level Folders
+        val designFolderId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = null,
+                name = "Architecture & Design",
+                colorArgb = 0xFFE85D04L,
+                iconName = FolderIconType.ARCHITECTURE.name
+            )
+        )
+        val notesFolderId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = null,
+                name = "Handwritten Study Notes",
+                colorArgb = 0xFF2A9D8FL,
+                iconName = FolderIconType.NOTES.name
+            )
+        )
+        val artFolderId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = null,
+                name = "Color & Brush Studies",
+                colorArgb = 0xFFF4A261L,
+                iconName = FolderIconType.PALETTE.name
+            )
+        )
+
+        // 2. Create Nested Subfolders (Level 2 & Level 3) to showcase unlimited nesting
+        val blueprintSubfolderId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = designFolderId,
+                name = "Tablet UI Wireframes",
+                colorArgb = 0xFF3B82F6L,
+                iconName = FolderIconType.GEOMETRY.name
+            )
+        )
+        val floorPlanNestedId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = designFolderId,
+                name = "Studio Floor Plans",
+                colorArgb = 0xFF8B5CF6L,
+                iconName = FolderIconType.ARCHITECTURE.name
+            )
+        )
+        val calligraphySubfolderId = folderDao.upsertFolder(
+            FolderEntity(
+                parentFolderId = notesFolderId,
+                name = "Fountain Nib Drills",
+                colorArgb = 0xFF10B981L,
+                iconName = FolderIconType.BOOKMARK.name
+            )
+        )
+
+        // 3. Starter Sheet 1 (Root Workspace, Starred): Studio Welcome & Color Study
         val starterStrokes = buildStarterStudioArtwork()
         val starterNotes = listOf(
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "CanvasFlow Studio • Pinch to Zoom (0.25x - 8.0x)",
+                text = "CanvasFlow 2.0 • 60fps Path-Cached Engine",
                 x = 120f,
                 y = 95f,
                 colorArgb = 0xFF18181BL,
@@ -61,7 +195,7 @@ class SketchRepository(private val dao: SketchPageDao) {
             ),
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "Multi-Screen Float Coverage • Draw & Write Freely",
+                text = "Multi-Screen Float Coverage • Pinch to Zoom (0.25x - 8.0x)",
                 x = 120f,
                 y = 132f,
                 colorArgb = 0xFFE85D04L,
@@ -70,6 +204,8 @@ class SketchRepository(private val dao: SketchPageDao) {
         )
         val firstId = savePage(
             id = 0L,
+            folderId = null, // Root Workspace for immediate visibility + also accessible in Recents/Favorites
+            isFavorite = true,
             title = "Studio Welcome & Color Study",
             categoryTag = "Drawing & Notes",
             paperTemplate = PaperTemplate.DOT_MATRIX,
@@ -78,7 +214,7 @@ class SketchRepository(private val dao: SketchPageDao) {
             zoomFloat = 1.0f
         )
 
-        // Starter Sheet 2: Ruled Handwriting & Lecture Notes
+        // 4. Starter Sheet 2 (Inside Handwritten Study Notes): Calligraphy & Ruled Notes
         val ruledStrokes = buildStarterHandwritingSheet()
         val ruledNotes = listOf(
             CanvasTextNote(
@@ -91,7 +227,7 @@ class SketchRepository(private val dao: SketchPageDao) {
             ),
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "1. Use Fountain Nib for pressure-sensitive calligraphy\n2. Pinch with two fingers to zoom up to 800% for micro-notes",
+                text = "1. Fountain Nib responds smoothly with zero frame lag\n2. Organize sheets into unlimited nested folders",
                 x = 150f,
                 y = 148f,
                 colorArgb = 0xFF18181BL,
@@ -100,6 +236,8 @@ class SketchRepository(private val dao: SketchPageDao) {
         )
         savePage(
             id = 0L,
+            folderId = notesFolderId,
+            isFavorite = true,
             title = "Calligraphy & Ruled Notes",
             categoryTag = "Handwriting",
             paperTemplate = PaperTemplate.RULED_NOTEBOOK,
@@ -108,11 +246,13 @@ class SketchRepository(private val dao: SketchPageDao) {
             zoomFloat = 1.0f
         )
 
-        // Starter Sheet 3: Dark Blueprint Concept
+        // 5. Starter Sheet 3 (Inside Architecture & Design -> Tablet UI Wireframes)
         val blueprintStrokes = buildStarterBlueprintSheet()
         savePage(
             id = 0L,
-            title = "Tablet UI Wireframe & Geometry",
+            folderId = blueprintSubfolderId,
+            isFavorite = false,
+            title = "Adaptive Multi-Screen Spec",
             categoryTag = "Blueprint",
             paperTemplate = PaperTemplate.DARK_SLATE,
             strokes = blueprintStrokes,
@@ -129,25 +269,74 @@ class SketchRepository(private val dao: SketchPageDao) {
             zoomFloat = 1.0f
         )
 
-        return firstId
+        // 6. Starter Sheet 4 (Inside Architecture & Design)
+        savePage(
+            id = 0L,
+            folderId = designFolderId,
+            isFavorite = false,
+            title = "Isometric Pavilion Sketch",
+            categoryTag = "Architecture",
+            paperTemplate = PaperTemplate.ISOMETRIC_DRAFT,
+            strokes = blueprintStrokes,
+            textNotes = listOf(
+                CanvasTextNote(
+                    id = UUID.randomUUID().toString(),
+                    text = "30° Axonometric Structural Grid",
+                    x = 140f,
+                    y = 120f,
+                    colorArgb = 0xFF18181BL,
+                    fontSizeSp = 17f
+                )
+            ),
+            zoomFloat = 1.0f
+        )
+
+        // 7. Starter Sheet 5 (Inside Color & Brush Studies)
+        savePage(
+            id = 0L,
+            folderId = artFolderId,
+            isFavorite = false,
+            title = "Vermilion & Teal Pigment Harmonies",
+            categoryTag = "Color Study",
+            paperTemplate = PaperTemplate.WARM_ARCHIVAL,
+            strokes = starterStrokes,
+            textNotes = emptyList(),
+            zoomFloat = 1.0f
+        )
+
+        // Suppress unused warning for nested empty demo folders
+        if (floorPlanNestedId < 0 || calligraphySubfolderId < 0) Unit
+
+        firstId
     }
 
     companion object {
         // Format: id|tool|colorArgb|width|alpha|x1,y1,p1;x2,y2,p2...
         fun serializeStrokes(strokes: List<DrawnStroke>): String {
             if (strokes.isEmpty()) return ""
-            return strokes.joinToString(separator = "\n") { s ->
-                val pts = s.points.joinToString(separator = ";") { pt ->
-                    "${pt.x},${pt.y},${pt.pressure}"
+            val sb = StringBuilder(strokes.size * 64)
+            for (i in strokes.indices) {
+                if (i > 0) sb.append('\n')
+                val s = strokes[i]
+                sb.append(s.id).append('|')
+                    .append(s.tool.name).append('|')
+                    .append(s.colorArgb).append('|')
+                    .append(s.strokeWidth).append('|')
+                    .append(s.alpha).append('|')
+                val pts = s.points
+                for (j in pts.indices) {
+                    if (j > 0) sb.append(';')
+                    val pt = pts[j]
+                    sb.append(pt.x).append(',').append(pt.y).append(',').append(pt.pressure)
                 }
-                "${s.id}|${s.tool.name}|${s.colorArgb}|${s.strokeWidth}|${s.alpha}|$pts"
             }
+            return sb.toString()
         }
 
         fun deserializeStrokes(payload: String): List<DrawnStroke> {
             if (payload.isBlank()) return emptyList()
-            return payload.lines().mapNotNull { line ->
-                val parts = line.split("|")
+            return payload.lineSequence().mapNotNull { line ->
+                val parts = line.split('|')
                 if (parts.size < 6) return@mapNotNull null
                 try {
                     val id = parts[0]
@@ -155,8 +344,8 @@ class SketchRepository(private val dao: SketchPageDao) {
                     val colorArgb = parts[2].toLong()
                     val strokeWidth = parts[3].toFloat()
                     val alpha = parts[4].toFloat()
-                    val points = parts[5].split(";").mapNotNull { ptStr ->
-                        val coords = ptStr.split(",")
+                    val points = parts[5].split(';').mapNotNull { ptStr ->
+                        val coords = ptStr.split(',')
                         if (coords.size >= 2) {
                             StrokePoint(
                                 x = coords[0].toFloat(),
@@ -176,7 +365,7 @@ class SketchRepository(private val dao: SketchPageDao) {
                 } catch (_: Exception) {
                     null
                 }
-            }
+            }.toList()
         }
 
         // Format: id|x|y|colorArgb|fontSizeSp|escapedText
@@ -211,7 +400,6 @@ class SketchRepository(private val dao: SketchPageDao) {
         private fun buildStarterStudioArtwork(): List<DrawnStroke> {
             val strokes = mutableListOf<DrawnStroke>()
 
-            // Expressive Vermilion Color Arc
             val arc1 = (0..36).map { i ->
                 val angle = Math.toRadians(195.0 + i * 4.2)
                 StrokePoint(
@@ -231,7 +419,6 @@ class SketchRepository(private val dao: SketchPageDao) {
                 )
             )
 
-            // Amber Gold Secondary Ribbon
             val arc2 = (0..36).map { i ->
                 val angle = Math.toRadians(198.0 + i * 4.0)
                 StrokePoint(
@@ -251,7 +438,6 @@ class SketchRepository(private val dao: SketchPageDao) {
                 )
             )
 
-            // Teal Studio Inner Wave
             val arc3 = (0..36).map { i ->
                 val angle = Math.toRadians(202.0 + i * 3.8)
                 StrokePoint(
@@ -271,7 +457,6 @@ class SketchRepository(private val dao: SketchPageDao) {
                 )
             )
 
-            // Architectural Perspective Frame Box
             strokes.add(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
@@ -286,7 +471,6 @@ class SketchRepository(private val dao: SketchPageDao) {
                 )
             )
 
-            // Handwritten Flourish Signature Wave at bottom of frame
             val flourish = (0..45).map { i ->
                 val t = i / 45f
                 StrokePoint(
@@ -311,7 +495,6 @@ class SketchRepository(private val dao: SketchPageDao) {
 
         private fun buildStarterHandwritingSheet(): List<DrawnStroke> {
             val strokes = mutableListOf<DrawnStroke>()
-            // Yellow Highlighter underline under title
             strokes.add(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
@@ -325,7 +508,6 @@ class SketchRepository(private val dao: SketchPageDao) {
                     tool = DrawingTool.CHISEL_MARKER
                 )
             )
-            // Calligraphic Practice Loops
             val loops = (0..60).map { i ->
                 val t = i / 60f
                 val angle = i * 0.48
