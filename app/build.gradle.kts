@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Base64
 
 plugins {
   alias(libs.plugins.android.application)
@@ -6,6 +7,16 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+}
+
+// Automatically materialize debug.keystore from debug.keystore.base64 on fresh GitHub clones
+val debugKeystoreFile = file("${rootDir}/debug.keystore")
+val debugKeystoreBase64File = file("${rootDir}/debug.keystore.base64")
+if (!debugKeystoreFile.exists() && debugKeystoreBase64File.exists()) {
+  runCatching {
+    val cleanBase64 = debugKeystoreBase64File.readText().replace("\\s".toRegex(), "")
+    debugKeystoreFile.writeBytes(Base64.getDecoder().decode(cleanBase64))
+  }
 }
 
 android {
@@ -63,7 +74,19 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all { testTask ->
+        val localRobolectricDir =
+          file("/home/appuser/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7")
+        if (localRobolectricDir.exists()) {
+          testTask.systemProperty("robolectric.offline", "true")
+          testTask.systemProperty("robolectric.dependency.dir", localRobolectricDir.absolutePath)
+        }
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
