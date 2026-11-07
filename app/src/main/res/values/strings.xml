@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">CanvasFlow</string>
+    <string name="studio_subtitle">Multi-Screen Drawing &amp; Writing Studio</string>
+    <string name="action_undo">Undo Stroke</string>
+    <string name="action_redo">Redo Stroke</string>
+    <string name="action_clear">Clear Canvas</string>
+    <string name="action_color_picker">Open Color Picker</string>
+    <string name="action_zoom_in">Zoom In</string>
+    <string name="action_zoom_out">Zoom Out</string>
+    <string name="action_zoom_reset">Reset Zoom to 100%</string>
+    <string name="action_pan_mode">Toggle Pan &amp; Pinch Navigation Mode</string>
+    <string name="action_sketchbook">Open Sketchbook Pages</string>
+    <string name="action_screen_metrics">Toggle Float &amp; Screen Coverage Inspector</string>
+    <string name="action_paper_style">Change Paper Template</string>
+    <string name="action_brush_settings">Brush &amp; Nib Settings</string>
+    <string name="action_minimap">Toggle Canvas Minimap</string>
+    <string name="action_hud_collapse">Toggle Full-Screen Immersion</string>
+    <string name="color_picker_title">Precision Studio Color Picker</string>
+    <string name="color_harmonies_label">Color Harmonies</string>
+    <string name="custom_swatches_label">Saved Studio Swatches</string>
+    <string name="screen_coverage_title">Multi-Screen Float &amp; Coverage Engine</string>
+    <string name="sketchbook_title">Studio Sketchbook &amp; Notes</string>
+    <string name="new_page_button">New Sheet</string>
+</resources>
