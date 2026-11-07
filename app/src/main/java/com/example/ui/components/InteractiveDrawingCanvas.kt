@@ -1,5 +1,10 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,11 +14,14 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -61,8 +71,7 @@ import com.example.model.DrawingTool
 import com.example.model.DrawnStroke
 import com.example.model.PaperTemplate
 import com.example.model.StrokePoint
-import com.example.ui.theme.StudioCharcoal
-import com.example.ui.theme.VermilionAccent
+import com.example.ui.theme.LocalStudioPalette
 import com.example.util.ColorMath
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -86,11 +95,19 @@ fun InteractiveDrawingCanvas(
     panOffsetY: Float,
     isPanNavigationMode: Boolean,
     showMinimap: Boolean,
+    gridSpacingMultiplierFloat: Float = 1.0f,
+    gridLineOpacityFloat: Float = 0.80f,
+    showRulerOverlay: Boolean = false,
+    rulerAngleDegrees: Float = 0f,
+    rulerYFraction: Float = 0.50f,
+    onUpdateRuler: (angleDegrees: Float?, yFraction: Float?) -> Unit = { _, _ -> },
+    onCloseRuler: () -> Unit = {},
     onCommitStroke: (List<StrokePoint>) -> Unit,
     onPinchZoomAndPan: (centroid: Offset, panDelta: Offset, zoomChange: Float, viewportW: Float, viewportH: Float) -> Unit,
     onRemoveTextNote: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = LocalStudioPalette.current
     // Zero-allocation live stroke buffers (mutated in-place, invalidated via liveStrokeTick)
     val livePointsBuffer = remember { ArrayList<StrokePoint>(256) }
     val livePath = remember { Path() }
@@ -228,7 +245,6 @@ fun InteractiveDrawingCanvas(
                 .fillMaxSize()
                 .graphicsLayer()
         ) {
-            // Read liveStrokeTick inside DrawScope so only the Canvas draw phase invalidates during finger drag
             val tick = liveStrokeTick
             if (tick < 0) return@Canvas
 
@@ -243,11 +259,13 @@ fun InteractiveDrawingCanvas(
                 translate(left = panOffsetX, top = panOffsetY)
                 scale(scaleX = zoomFloat, scaleY = zoomFloat, pivot = Offset.Zero)
             }) {
-                // 1. Draw Adaptive LOD Paper Template Grid
+                // 1. Draw Adaptive LOD Paper Template Grid with user-customized spacing & opacity
                 drawPaperTemplateGridLod(
                     template = paperTemplate,
                     gridColor = gridColor,
                     zoomFloat = zoomFloat,
+                    spacingMultiplier = gridSpacingMultiplierFloat,
+                    opacityMultiplier = gridLineOpacityFloat,
                     visibleRect = visibleRect
                 )
 
@@ -288,7 +306,7 @@ fun InteractiveDrawingCanvas(
                 // 4. Draw Eraser Ring Reticle if erasing
                 if (selectedTool == DrawingTool.ERASER && lastTouchCanvasPoint != null) {
                     drawCircle(
-                        color = VermilionAccent.copy(alpha = 0.85f),
+                        color = palette.secondary.copy(alpha = 0.85f),
                         radius = strokeWidth * 0.5f,
                         center = lastTouchCanvasPoint!!,
                         style = Stroke(width = 1.8f / zoomFloat)
@@ -297,7 +315,7 @@ fun InteractiveDrawingCanvas(
             }
         }
 
-        // 5. Render Movable / Deletable Typography & Handwriting Callout Notes
+        // 5. Render Movable / Deletable Typography, Symbol Stamps & Callout Notes
         textNotes.forEach { note ->
             val screenX = (note.x * zoomFloat + panOffsetX).roundToInt()
             val screenY = (note.y * zoomFloat + panOffsetY).roundToInt()
@@ -309,15 +327,15 @@ fun InteractiveDrawingCanvas(
                 modifier = Modifier
                     .offset { IntOffset(screenX, screenY) }
                     .background(
-                        color = backgroundColor.copy(alpha = 0.78f),
-                        shape = RoundedCornerShape(8.dp)
+                        color = backgroundColor.copy(alpha = 0.88f),
+                        shape = RoundedCornerShape(10.dp)
                     )
                     .border(
                         width = 1.dp,
-                        color = noteColor.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(8.dp)
+                        color = noteColor.copy(alpha = 0.42f),
+                        shape = RoundedCornerShape(10.dp)
                     )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
             ) {
                 Text(
                     text = note.text,
@@ -332,21 +350,43 @@ fun InteractiveDrawingCanvas(
                         .padding(start = 6.dp)
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(StudioCharcoal.copy(alpha = 0.15f))
+                        .background(palette.badgeSurface)
                         .clickable { onRemoveTextNote(note.id) }
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Remove text note",
-                        tint = noteColor.copy(alpha = 0.75f),
+                        tint = noteColor.copy(alpha = 0.8f),
                         modifier = Modifier.size(12.dp)
                     )
                 }
             }
         }
 
-        // 6. Floating Minimap / Viewport Radar Overlay
-        if (showMinimap) {
+        // 6. Interactive Straightedge & Protractor Ruler Guide Overlay
+        AnimatedVisibility(
+            visible = showRulerOverlay,
+            enter = fadeIn() + scaleIn(initialScale = 0.94f),
+            exit = fadeOut() + scaleOut(targetScale = 0.94f)
+        ) {
+            StraightedgeRulerOverlay(
+                angleDegrees = rulerAngleDegrees,
+                yFraction = rulerYFraction,
+                viewportHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f),
+                onUpdateRuler = onUpdateRuler,
+                onCloseRuler = onCloseRuler
+            )
+        }
+
+        // 7. Floating Minimap / Viewport Radar Overlay
+        AnimatedVisibility(
+            visible = showMinimap,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut() + scaleOut(targetScale = 0.9f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 74.dp, end = 14.dp)
+        ) {
             CanvasMinimapOverlay(
                 strokes = strokes,
                 zoomFloat = zoomFloat,
@@ -354,11 +394,170 @@ fun InteractiveDrawingCanvas(
                 panOffsetY = panOffsetY,
                 viewportWidthPx = canvasSizePx.width.toFloat().coerceAtLeast(1f),
                 viewportHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f),
-                paperTemplate = paperTemplate,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 74.dp, end = 14.dp)
+                paperTemplate = paperTemplate
             )
+        }
+    }
+}
+
+@Composable
+private fun StraightedgeRulerOverlay(
+    angleDegrees: Float,
+    yFraction: Float,
+    viewportHeightPx: Float,
+    onUpdateRuler: (angleDegrees: Float?, yFraction: Float?) -> Unit,
+    onCloseRuler: () -> Unit
+) {
+    val palette = LocalStudioPalette.current
+    val currentYFrac by rememberUpdatedState(yFraction)
+    val currentAngle by rememberUpdatedState(angleDegrees)
+    val offsetY = ((yFraction * viewportHeightPx) - 34f).roundToInt()
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(0, offsetY) }
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .graphicsLayer {
+                rotationZ = angleDegrees
+            }
+            .testTag("interactive_straightedge_ruler")
+    ) {
+        Surface(
+            color = palette.surfaceElevated.copy(alpha = 0.88f),
+            shape = RoundedCornerShape(14.dp),
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .border(1.5.dp, palette.accent.copy(alpha = 0.75f), RoundedCornerShape(14.dp))
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        val nextY = currentYFrac + (dragAmount.y / viewportHeightPx)
+                        onUpdateRuler(null, nextY)
+                    }
+                }
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Top Millimeter Tick Scale Canvas
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(18.dp)
+                ) {
+                    val stepPx = 14f
+                    var x = 16f
+                    var tickIndex = 0
+                    while (x < size.width - 16f) {
+                        val isMajor = tickIndex % 10 == 0
+                        val isMid = tickIndex % 5 == 0
+                        val tickH = when {
+                            isMajor -> 14f
+                            isMid -> 10f
+                            else -> 6f
+                        }
+                        drawLine(
+                            color = palette.textPrimary.copy(alpha = if (isMajor) 0.85f else 0.45f),
+                            start = Offset(x, 0f),
+                            end = Offset(x, tickH),
+                            strokeWidth = if (isMajor) 1.8f else 1.0f
+                        )
+                        x += stepPx
+                        tickIndex++
+                    }
+                }
+
+                // Center Protractor & Angle Snap Controls
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DragHandle,
+                            contentDescription = "Drag Straightedge",
+                            tint = palette.textSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "STRAIGHTEDGE • ${angleDegrees.roundToInt()}°",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.textPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(-45f, -30f, 0f, 30f, 45f).forEach { snapAngle ->
+                            val isSelected = abs(angleDegrees - snapAngle) < 1f
+                            Surface(
+                                color = if (isSelected) palette.primary else palette.badgeSurface,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.clickable { onUpdateRuler(snapAngle, null) }
+                            ) {
+                                Text(
+                                    text = "${snapAngle.roundToInt()}°",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) palette.onPrimary else palette.textSecondary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        // Fine Rotate Dial Drag Button
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(palette.badgeSurface)
+                                .pointerInput(Unit) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        val nextAngle = currentAngle + (dragAmount.x * 0.25f)
+                                        onUpdateRuler(nextAngle, null)
+                                    }
+                                }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RotateRight,
+                                contentDescription = "Rotate Ruler",
+                                tint = palette.accent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(palette.badgeSurface)
+                                .clickable { onCloseRuler() }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Hide Ruler",
+                                tint = palette.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -367,6 +566,8 @@ private fun DrawScope.drawPaperTemplateGridLod(
     template: PaperTemplate,
     gridColor: Color,
     zoomFloat: Float,
+    spacingMultiplier: Float,
+    opacityMultiplier: Float,
     visibleRect: Rect
 ) {
     val startX = visibleRect.left
@@ -374,12 +575,13 @@ private fun DrawScope.drawPaperTemplateGridLod(
     val endX = visibleRect.right
     val endY = visibleRect.bottom
 
-    // Adaptive Level-of-Detail (LOD) multiplier so zoomed-out views never draw excessive lines
     val lodMultiplier = when {
         zoomFloat < 0.40f -> 4f
         zoomFloat < 0.72f -> 2f
         else -> 1f
-    }
+    } * spacingMultiplier.coerceIn(0.55f, 2.20f)
+
+    val alphaScale = opacityMultiplier.coerceIn(0.15f, 1.0f)
 
     when (template) {
         PaperTemplate.WARM_ARCHIVAL, PaperTemplate.DARK_SLATE -> {
@@ -391,13 +593,13 @@ private fun DrawScope.drawPaperTemplateGridLod(
                 var y = firstY
                 while (y <= endY) {
                     drawLine(
-                        color = gridColor.copy(alpha = 0.55f),
+                        color = gridColor.copy(alpha = 0.55f * alphaScale),
                         start = Offset(x - 5f, y),
                         end = Offset(x + 5f, y),
                         strokeWidth = 1.2f
                     )
                     drawLine(
-                        color = gridColor.copy(alpha = 0.55f),
+                        color = gridColor.copy(alpha = 0.55f * alphaScale),
                         start = Offset(x, y - 5f),
                         end = Offset(x, y + 5f),
                         strokeWidth = 1.2f
@@ -414,7 +616,7 @@ private fun DrawScope.drawPaperTemplateGridLod(
             var y = firstY
             while (y <= endY) {
                 drawLine(
-                    color = gridColor.copy(alpha = 0.78f),
+                    color = gridColor.copy(alpha = 0.78f * alphaScale),
                     start = Offset(startX, y),
                     end = Offset(endX, y),
                     strokeWidth = 1.3f
@@ -423,13 +625,13 @@ private fun DrawScope.drawPaperTemplateGridLod(
             }
             if (115f in startX..endX) {
                 drawLine(
-                    color = Color(0xFFEF4444).copy(alpha = 0.55f),
+                    color = Color(0xFFB56A56).copy(alpha = 0.50f * alphaScale),
                     start = Offset(115f, startY),
                     end = Offset(115f, endY),
-                    strokeWidth = 2.0f
+                    strokeWidth = 1.8f
                 )
                 drawLine(
-                    color = Color(0xFFEF4444).copy(alpha = 0.28f),
+                    color = Color(0xFFB56A56).copy(alpha = 0.25f * alphaScale),
                     start = Offset(121f, startY),
                     end = Offset(121f, endY),
                     strokeWidth = 1.0f
@@ -446,7 +648,7 @@ private fun DrawScope.drawPaperTemplateGridLod(
                 var y = firstY
                 while (y <= endY) {
                     drawCircle(
-                        color = gridColor.copy(alpha = 0.85f),
+                        color = gridColor.copy(alpha = 0.85f * alphaScale),
                         radius = 1.8f,
                         center = Offset(x, y)
                     )
@@ -465,7 +667,11 @@ private fun DrawScope.drawPaperTemplateGridLod(
                 val index = (x / minorStep).roundToInt()
                 val isMajor = index % 5 == 0
                 drawLine(
-                    color = if (isMajor) gridColor.copy(alpha = 0.9f) else gridColor.copy(alpha = 0.42f),
+                    color = if (isMajor) {
+                        gridColor.copy(alpha = 0.90f * alphaScale)
+                    } else {
+                        gridColor.copy(alpha = 0.42f * alphaScale)
+                    },
                     start = Offset(x, startY),
                     end = Offset(x, endY),
                     strokeWidth = if (isMajor) 1.6f else 0.8f
@@ -477,7 +683,11 @@ private fun DrawScope.drawPaperTemplateGridLod(
                 val index = (y / minorStep).roundToInt()
                 val isMajor = index % 5 == 0
                 drawLine(
-                    color = if (isMajor) gridColor.copy(alpha = 0.9f) else gridColor.copy(alpha = 0.42f),
+                    color = if (isMajor) {
+                        gridColor.copy(alpha = 0.90f * alphaScale)
+                    } else {
+                        gridColor.copy(alpha = 0.42f * alphaScale)
+                    },
                     start = Offset(startX, y),
                     end = Offset(endX, y),
                     strokeWidth = if (isMajor) 1.6f else 0.8f
@@ -492,7 +702,7 @@ private fun DrawScope.drawPaperTemplateGridLod(
             var y = firstY
             while (y <= endY) {
                 drawLine(
-                    color = gridColor.copy(alpha = 0.55f),
+                    color = gridColor.copy(alpha = 0.55f * alphaScale),
                     start = Offset(startX, y),
                     end = Offset(endX, y),
                     strokeWidth = 1.0f
@@ -503,7 +713,7 @@ private fun DrawScope.drawPaperTemplateGridLod(
             var x = firstX
             while (x <= endX) {
                 drawLine(
-                    color = gridColor.copy(alpha = 0.65f),
+                    color = gridColor.copy(alpha = 0.65f * alphaScale),
                     start = Offset(x, startY),
                     end = Offset(x, endY),
                     strokeWidth = 1.0f
@@ -644,22 +854,24 @@ private fun CanvasMinimapOverlay(
     paperTemplate: PaperTemplate,
     modifier: Modifier = Modifier
 ) {
+    val palette = LocalStudioPalette.current
     Surface(
-        color = StudioCharcoal.copy(alpha = 0.86f),
-        shape = RoundedCornerShape(12.dp),
+        color = palette.surfaceElevated.copy(alpha = 0.94f),
+        shape = RoundedCornerShape(14.dp),
         tonalElevation = 6.dp,
         modifier = modifier
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+            .border(1.dp, palette.border, RoundedCornerShape(14.dp))
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(6.dp)
+            modifier = Modifier.padding(7.dp)
         ) {
             Canvas(
                 modifier = Modifier
-                    .size(width = 74.dp, height = 52.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .size(width = 76.dp, height = 52.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(Color(paperTemplate.backgroundColorHex))
+                    .border(1.dp, palette.border, RoundedCornerShape(8.dp))
             ) {
                 val worldW = max(viewportWidthPx * 2.2f, 1600f)
                 val worldH = max(viewportHeightPx * 2.2f, 1600f)
@@ -692,7 +904,7 @@ private fun CanvasMinimapOverlay(
                 val viewH = (viewportHeightPx / zoomFloat) * scaleY
 
                 drawRect(
-                    color = VermilionAccent,
+                    color = palette.secondary,
                     topLeft = Offset(
                         viewLeft.coerceIn(0f, size.width - 6f),
                         viewTop.coerceIn(0f, size.height - 6f)
@@ -701,24 +913,24 @@ private fun CanvasMinimapOverlay(
                         viewW.coerceIn(6f, size.width),
                         viewH.coerceIn(6f, size.height)
                     ),
-                    style = Stroke(width = 1.5f)
+                    style = Stroke(width = 1.6f)
                 )
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 3.dp)
+                modifier = Modifier.padding(top = 4.dp)
             ) {
                 Text(
-                    text = String.format("%.2fx", zoomFloat),
+                    text = String.format("⌖ %.2fx", zoomFloat),
                     style = MaterialTheme.typography.labelSmall,
-                    color = VermilionAccent,
+                    color = palette.secondary,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "${(zoomFloat * 100).roundToInt()}%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.85f)
+                    color = palette.textSecondary
                 )
             }
         }

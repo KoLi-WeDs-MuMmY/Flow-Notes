@@ -14,13 +14,17 @@ import com.example.model.CanvasTextNote
 import com.example.model.DevicePosture
 import com.example.model.DrawingTool
 import com.example.model.DrawnStroke
+import com.example.model.FloatingLayoutPreset
 import com.example.model.FolderIconType
 import com.example.model.HomeFilterMode
 import com.example.model.PaperTemplate
 import com.example.model.ScreenCoveragePreset
 import com.example.model.ScreenFloatMetrics
 import com.example.model.StrokePoint
+import com.example.model.StudioCustomization
 import com.example.model.StudioPalettes
+import com.example.model.SymbolStampType
+import com.example.ui.theme.StudioThemeId
 import com.example.util.ColorMath
 import com.example.util.HsvColor
 import kotlinx.coroutines.Dispatchers
@@ -42,17 +46,20 @@ data class StudioUiState(
     val currentFolderId: Long? = null,
     val homeFilterMode: HomeFilterMode = HomeFilterMode.EXPLORER,
     val searchQuery: String = "",
+    // Theme & Deep Workspace Customization
+    val customization: StudioCustomization = StudioCustomization(),
+    val isCustomizationModalOpen: Boolean = false,
     // Active Sheet State in Studio Canvas
     val activePageId: Long = 0L,
     val activePageFolderId: Long? = null,
     val activePageIsFavorite: Boolean = false,
-    val activePageTitle: String = "Studio Welcome & Color Study",
+    val activePageTitle: String = "Atelier Welcome & Pigment Study",
     val activePageCategory: String = "Drawing & Notes",
     val paperTemplate: PaperTemplate = PaperTemplate.DOT_MATRIX,
     val selectedTool: DrawingTool = DrawingTool.FOUNTAIN_PEN,
-    val activeColor: Color = Color(0xFFE85D04),
-    val hsvColor: HsvColor = ColorMath.colorToHsv(Color(0xFFE85D04)),
-    val strokeWidth: Float = 5.5f,
+    val activeColor: Color = Color(0xFF232625), // Sumi Carbon Ink
+    val hsvColor: HsvColor = ColorMath.colorToHsv(Color(0xFF232625)),
+    val strokeWidth: Float = 5.2f,
     val strokeAlpha: Float = 1.0f,
     val strokes: List<DrawnStroke> = emptyList(),
     val redoStrokes: List<DrawnStroke> = emptyList(),
@@ -66,16 +73,23 @@ data class StudioUiState(
     // Multi-Screen Float & Coverage Percentages State
     val coveragePreset: ScreenCoveragePreset = ScreenCoveragePreset.STUDIO_BALANCED,
     val customCoverageFloat: Float = 0.90f,
-    val floatingPaletteXFraction: Float = 0.50f,
-    val floatingPaletteYFraction: Float = 0.92f,
+    // Independent Normalized Float Positions (0.0f..1.0f) for Modular Floating Widgets
+    val toolPodXFraction: Float = 0.04f,
+    val toolPodYFraction: Float = 0.24f,
+    val colorPodXFraction: Float = 0.50f,
+    val colorPodYFraction: Float = 0.92f,
+    val symbolPodXFraction: Float = 0.94f,
+    val symbolPodYFraction: Float = 0.42f,
+    val scratchpadXFraction: Float = 0.72f,
+    val scratchpadYFraction: Float = 0.20f,
     // Color Picker & Swatches
     val customSavedSwatches: List<Color> = StudioPalettes.CuratedSwatches,
     val recentColors: List<Color> = listOf(
-        Color(0xFFE85D04),
-        Color(0xFF1D4ED8),
-        Color(0xFF2A9D8F),
-        Color(0xFFF4A261),
-        Color(0xFF18181B)
+        Color(0xFF232625),
+        Color(0xFF8C5843),
+        Color(0xFF526B5C),
+        Color(0xFF3D5265),
+        Color(0xFFA67C52)
     ),
     // Dialog / Sheet Modals
     val isColorPickerOpen: Boolean = false,
@@ -158,6 +172,199 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // --- Theme & Deep Workspace Customization ---
+
+    fun selectStudioTheme(themeId: StudioThemeId) {
+        _uiState.update { state ->
+            state.copy(customization = state.customization.copy(themeId = themeId))
+        }
+    }
+
+    fun updateCornerRadiusDp(radiusDp: Float) {
+        _uiState.update { state ->
+            state.copy(
+                customization = state.customization.copy(
+                    cornerRadiusDp = radiusDp.coerceIn(6f, 28f)
+                )
+            )
+        }
+    }
+
+    fun updateWidgetOpacityFloat(opacity: Float) {
+        _uiState.update { state ->
+            state.copy(
+                customization = state.customization.copy(
+                    widgetOpacityFloat = opacity.coerceIn(0.70f, 1.00f)
+                )
+            )
+        }
+    }
+
+    fun updateGridCustomization(spacingMultiplier: Float, lineOpacity: Float) {
+        _uiState.update { state ->
+            state.copy(
+                customization = state.customization.copy(
+                    gridSpacingMultiplierFloat = spacingMultiplier.coerceIn(0.55f, 2.20f),
+                    gridLineOpacityFloat = lineOpacity.coerceIn(0.15f, 1.00f)
+                )
+            )
+        }
+    }
+
+    fun applyFloatingLayoutPreset(preset: FloatingLayoutPreset) {
+        _uiState.update { state ->
+            when (preset) {
+                FloatingLayoutPreset.ATELIER_BALANCED -> state.copy(
+                    customization = state.customization.copy(
+                        layoutPreset = preset,
+                        showToolPod = true,
+                        isToolPodCompact = false,
+                        showColorPod = true,
+                        showZoomCompassPod = true,
+                        showSymbolStampPod = true
+                    ),
+                    toolPodXFraction = 0.04f,
+                    toolPodYFraction = 0.24f,
+                    colorPodXFraction = 0.50f,
+                    colorPodYFraction = 0.92f,
+                    symbolPodXFraction = 0.94f,
+                    symbolPodYFraction = 0.42f
+                )
+
+                FloatingLayoutPreset.LEFT_HANDED_STUDIO -> state.copy(
+                    customization = state.customization.copy(
+                        layoutPreset = preset,
+                        showToolPod = true,
+                        isToolPodCompact = false,
+                        showColorPod = true,
+                        showSymbolStampPod = true
+                    ),
+                    toolPodXFraction = 0.04f,
+                    toolPodYFraction = 0.22f,
+                    symbolPodXFraction = 0.04f,
+                    symbolPodYFraction = 0.68f,
+                    colorPodXFraction = 0.62f,
+                    colorPodYFraction = 0.92f
+                )
+
+                FloatingLayoutPreset.RIGHT_HANDED_STUDIO -> state.copy(
+                    customization = state.customization.copy(
+                        layoutPreset = preset,
+                        showToolPod = true,
+                        isToolPodCompact = false,
+                        showColorPod = true,
+                        showSymbolStampPod = true
+                    ),
+                    toolPodXFraction = 0.94f,
+                    toolPodYFraction = 0.22f,
+                    symbolPodXFraction = 0.94f,
+                    symbolPodYFraction = 0.68f,
+                    colorPodXFraction = 0.38f,
+                    colorPodYFraction = 0.92f
+                )
+
+                FloatingLayoutPreset.MINIMAL_CORNERS -> state.copy(
+                    customization = state.customization.copy(
+                        layoutPreset = preset,
+                        showToolPod = true,
+                        isToolPodCompact = true,
+                        showColorPod = true,
+                        showSymbolStampPod = false
+                    ),
+                    toolPodXFraction = 0.04f,
+                    toolPodYFraction = 0.88f,
+                    colorPodXFraction = 0.55f,
+                    colorPodYFraction = 0.92f
+                )
+            }
+        }
+    }
+
+    fun toggleFloatingWidget(
+        toolPod: Boolean? = null,
+        toolPodCompact: Boolean? = null,
+        colorPod: Boolean? = null,
+        zoomPod: Boolean? = null,
+        symbolPod: Boolean? = null,
+        scratchpadPod: Boolean? = null,
+        rulerOverlay: Boolean? = null
+    ) {
+        _uiState.update { state ->
+            val c = state.customization
+            state.copy(
+                customization = c.copy(
+                    showToolPod = toolPod ?: c.showToolPod,
+                    isToolPodCompact = toolPodCompact ?: c.isToolPodCompact,
+                    showColorPod = colorPod ?: c.showColorPod,
+                    showZoomCompassPod = zoomPod ?: c.showZoomCompassPod,
+                    showSymbolStampPod = symbolPod ?: c.showSymbolStampPod,
+                    showScratchpadPod = scratchpadPod ?: c.showScratchpadPod,
+                    showRulerGuideOverlay = rulerOverlay ?: c.showRulerGuideOverlay
+                )
+            )
+        }
+    }
+
+    fun updateRulerOverlay(angleDegrees: Float? = null, yFraction: Float? = null) {
+        _uiState.update { state ->
+            val c = state.customization
+            state.copy(
+                customization = c.copy(
+                    rulerAngleDegrees = (angleDegrees ?: c.rulerAngleDegrees).coerceIn(-85f, 85f),
+                    rulerYFraction = (yFraction ?: c.rulerYFraction).coerceIn(0.12f, 0.88f)
+                )
+            )
+        }
+    }
+
+    fun updateScratchpadText(text: String) {
+        _uiState.update { state ->
+            state.copy(
+                customization = state.customization.copy(scratchpadNoteText = text)
+            )
+        }
+    }
+
+    fun updateToolPodPosition(xFrac: Float, yFrac: Float) {
+        _uiState.update {
+            it.copy(
+                toolPodXFraction = xFrac.coerceIn(0.02f, 0.94f),
+                toolPodYFraction = yFrac.coerceIn(0.10f, 0.92f)
+            )
+        }
+    }
+
+    fun updateColorPodPosition(xFrac: Float, yFrac: Float) {
+        _uiState.update {
+            it.copy(
+                colorPodXFraction = xFrac.coerceIn(0.08f, 0.92f),
+                colorPodYFraction = yFrac.coerceIn(0.10f, 0.95f)
+            )
+        }
+    }
+
+    fun updateSymbolPodPosition(xFrac: Float, yFrac: Float) {
+        _uiState.update {
+            it.copy(
+                symbolPodXFraction = xFrac.coerceIn(0.02f, 0.96f),
+                symbolPodYFraction = yFrac.coerceIn(0.12f, 0.90f)
+            )
+        }
+    }
+
+    fun updateScratchpadPosition(xFrac: Float, yFrac: Float) {
+        _uiState.update {
+            it.copy(
+                scratchpadXFraction = xFrac.coerceIn(0.04f, 0.90f),
+                scratchpadYFraction = yFrac.coerceIn(0.12f, 0.88f)
+            )
+        }
+    }
+
+    fun setCustomizationModalOpen(open: Boolean) {
+        _uiState.update { it.copy(isCustomizationModalOpen = open) }
+    }
+
     // --- Home Page & Nested Folder Navigation ---
 
     fun navigateToHomeExplorer() {
@@ -206,10 +413,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Steps up one level in the nested folder tree.
-     * Returns true if navigated to a parent folder, or false if already at Root (null).
-     */
     fun navigateUpFolder(): Boolean {
         val currentId = _uiState.value.currentFolderId ?: return false
         val currentFolder = allFolders.value.firstOrNull { it.id == currentId }
@@ -217,9 +420,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return true
     }
 
-    /**
-     * Builds the ordered ancestor breadcrumb chain from Root down to [targetFolderId].
-     */
     fun buildBreadcrumbPath(targetFolderId: Long?, folders: List<FolderEntity>): List<FolderEntity> {
         if (targetFolderId == null) return emptyList()
         val folderMap = folders.associateBy { it.id }
@@ -287,7 +487,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Studio Drawing & Writing Controls ---
+    // --- Studio Drawing, Writing & Symbol Stamp Controls ---
 
     fun selectTool(tool: DrawingTool) {
         _uiState.update { state ->
@@ -386,6 +586,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         triggerAutoSave()
+    }
+
+    fun stampSymbolOnCanvas(symbol: SymbolStampType) {
+        val state = _uiState.value
+        val jitter = (state.textNotes.size % 6) * 26f
+        val targetX = ((-state.panOffsetX + 240f) / state.zoomFloat) + jitter
+        val targetY = ((-state.panOffsetY + 300f) / state.zoomFloat) + jitter
+        addTextNote(
+            text = symbol.glyph,
+            canvasX = targetX,
+            canvasY = targetY,
+            fontSizeSp = symbol.defaultSizeSp
+        )
     }
 
     fun addTextNote(text: String, canvasX: Float = 180f, canvasY: Float = 220f, fontSizeSp: Float = 18f) {
@@ -533,15 +746,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun updateFloatingPaletteFraction(xFraction: Float, yFraction: Float) {
-        _uiState.update { state ->
-            state.copy(
-                floatingPaletteXFraction = xFraction.coerceIn(0.08f, 0.92f),
-                floatingPaletteYFraction = yFraction.coerceIn(0.10f, 0.94f)
-            )
-        }
-    }
-
     fun computeScreenFloatMetrics(widthDp: Float, heightDp: Float): ScreenFloatMetrics {
         val safeW = widthDp.coerceAtLeast(1f)
         val safeH = heightDp.coerceAtLeast(1f)
@@ -570,10 +774,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val bottomDockWidthFraction = when (posture) {
-            DevicePosture.MOBILE_PORTRAIT -> (0.72f + hudBudgetFloat * 0.8f).coerceIn(0.68f, 0.96f)
-            DevicePosture.MOBILE_LANDSCAPE -> 0.64f
-            DevicePosture.FOLDABLE_MEDIUM -> 0.76f
-            DevicePosture.TABLET_EXPANDED -> 0.58f
+            DevicePosture.MOBILE_PORTRAIT -> (0.72f + hudBudgetFloat * 0.8f).coerceIn(0.68f, 0.94f)
+            DevicePosture.MOBILE_LANDSCAPE -> 0.62f
+            DevicePosture.FOLDABLE_MEDIUM -> 0.70f
+            DevicePosture.TABLET_EXPANDED -> 0.54f
         }
 
         val sideRailWidthFraction = when (posture) {
@@ -590,7 +794,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             else -> 0.0f
         }
 
-        // Variable-Screen Float Allocations for the Home Page & Folder Explorer
         val homeSidebarWidthFraction = when (posture) {
             DevicePosture.TABLET_EXPANDED -> 0.26f
             DevicePosture.FOLDABLE_MEDIUM -> 0.30f
@@ -627,10 +830,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectPaperTemplate(template: PaperTemplate) {
         _uiState.update { state ->
-            val nextColor = if (template.isDark && state.activeColor == Color(0xFF18181B)) {
-                Color(0xFFF8FAFC)
-            } else if (!template.isDark && state.activeColor == Color(0xFFF8FAFC)) {
-                Color(0xFF18181B)
+            val nextColor = if (template.isDark && state.activeColor == Color(0xFF232625)) {
+                Color(0xFFF6F4EE)
+            } else if (!template.isDark && state.activeColor == Color(0xFFF6F4EE)) {
+                Color(0xFF232625)
             } else {
                 state.activeColor
             }
@@ -655,7 +858,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             val cleanTitle = title.trim().ifBlank { "Untitled Studio Sheet" }
-            val defaultColor = if (template.isDark) Color(0xFFF4A261) else Color(0xFF18181B)
+            val defaultColor = if (template.isDark) Color(0xFFA67C52) else Color(0xFF232625)
             val newId = repository.savePage(
                 id = 0L,
                 folderId = targetFolderId,

@@ -4,8 +4,8 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import com.example.ui.theme.StudioThemeId
 import kotlin.math.max
-import kotlin.math.min
 
 enum class AppDestination {
     HOME_EXPLORER,
@@ -13,80 +13,121 @@ enum class AppDestination {
 }
 
 enum class HomeFilterMode(val label: String) {
-    EXPLORER("Workspace Folders"),
-    FAVORITES("Starred Sheets"),
+    EXPLORER("Folders & Sheets"),
+    FAVORITES("Starred"),
     RECENTS("Recent Activity")
 }
 
-enum class FolderIconType(val label: String) {
-    FOLDER("Classic Folder"),
-    ARCHITECTURE("Drafting & CAD"),
-    NOTES("Handwritten Notes"),
-    PALETTE("Illustration & Art"),
-    GEOMETRY("Wireframes & Math"),
-    BOOKMARK("Collection")
+enum class FolderIconType(val label: String, val symbolGlyph: String) {
+    FOLDER("Atelier Folder", "▣"),
+    ARCHITECTURE("Drafting & CAD", "⌖"),
+    NOTES("Manuscript Notes", "¶"),
+    PALETTE("Color & Wash", "◈"),
+    GEOMETRY("Axonometric", "△"),
+    BOOKMARK("Curated Folio", "§"),
+    SCIENCE("Lab & Equations", "∑"),
+    JOURNAL("Daily Sketchbook", "✦"),
+    ARCHIVE("Vault Archive", "❖"),
+    LIGHTBULB("Concept Studies", "☼")
+}
+
+enum class SymbolStampType(
+    val label: String,
+    val glyph: String,
+    val defaultSizeSp: Float = 24f
+) {
+    CHECK_SEAL("Verified", "✓ Check"),
+    STAR_BADGE("Key Point", "★ Key"),
+    PIN_MARKER("Location Pin", "⌖ Pin"),
+    ARROW_NORTH("North Axis", "↑ N 0°"),
+    IDEA_SPARK("Insight", "✦ Insight"),
+    WARNING_TAG("Attention", "⚠ Review"),
+    MATH_SIGMA("Summation", "∑ f(x)"),
+    ANGLE_ARC("90° Right Angle", "∟ 90°"),
+    QUOTE_MARK("Editorial Note", "❝ Note ❞"),
+    FOCUS_BRACKET("Section Callout", "⟦ Section A ⟧"),
+    ORIGIN_AXIS("XY Origin", "┼ (0,0)"),
+    DIAMOND_NODE("Milestone", "◆ Node")
+}
+
+enum class FloatingLayoutPreset(
+    val title: String,
+    val subtitle: String
+) {
+    ATELIER_BALANCED("Atelier Pods", "Independent floating tool, color & symbol pods"),
+    LEFT_HANDED_STUDIO("Left-Handed Deck", "Tools & symbols docked left, colors bottom-right"),
+    RIGHT_HANDED_STUDIO("Right-Handed Deck", "Tools & symbols docked right, colors bottom-left"),
+    MINIMAL_CORNERS("Minimalist Corners", "Compact corner pods with 96% canvas visibility")
 }
 
 enum class DrawingTool(
     val label: String,
     val shortCode: String,
+    val symbolGlyph: String,
     val defaultWidth: Float,
     val defaultAlpha: Float,
     val isShape: Boolean = false
 ) {
-    FOUNTAIN_PEN("Fountain Nib", "NIB", 5.5f, 1.0f),
-    FINELINER("Fine Liner", "INK", 2.8f, 1.0f),
-    CHISEL_MARKER("Highlighter", "MRK", 22.0f, 0.38f),
-    ART_BRUSH("Studio Brush", "BRS", 14.0f, 0.88f),
-    CHARCOAL("Charcoal", "CHR", 9.5f, 0.72f),
-    RULER_LINE("Ruler Line", "LIN", 4.0f, 1.0f, isShape = true),
-    RECTANGLE_SHAPE("Rectangle", "RCT", 4.0f, 1.0f, isShape = true),
-    CIRCLE_SHAPE("Circle", "CIR", 4.0f, 1.0f, isShape = true),
-    ERASER("Eraser", "ERS", 26.0f, 1.0f)
+    FOUNTAIN_PEN("Fountain Nib", "NIB", "✒", 5.2f, 1.0f),
+    FINELINER("Technical Pen", "0.3", "∣", 2.6f, 1.0f),
+    CHISEL_MARKER("Wash Marker", "MRK", "▱", 20.0f, 0.36f),
+    ART_BRUSH("Sable Brush", "BRS", "∿", 14.0f, 0.88f),
+    CHARCOAL("Willow Charcoal", "CHR", "░", 9.5f, 0.72f),
+    RULER_LINE("Drafting Line", "LIN", "╱", 3.5f, 1.0f, isShape = true),
+    RECTANGLE_SHAPE("Frame Box", "RCT", "▭", 3.5f, 1.0f, isShape = true),
+    CIRCLE_SHAPE("Compass Circle", "CIR", "◯", 3.5f, 1.0f, isShape = true),
+    ERASER("Kneaded Eraser", "ERS", "⌫", 26.0f, 1.0f)
 }
 
 enum class PaperTemplate(
     val title: String,
     val subtitle: String,
+    val symbolGlyph: String,
     val backgroundColorHex: Long,
     val lineColorHex: Long,
     val isDark: Boolean = false
 ) {
     WARM_ARCHIVAL(
-        title = "Archival Cream",
-        subtitle = "Smooth heavyweight sketch paper",
-        backgroundColorHex = 0xFFFBF9F5,
-        lineColorHex = 0xFFE5E0D5
+        title = "Fabriano Cream",
+        subtitle = "Heavyweight cotton rag sketch paper",
+        symbolGlyph = "□",
+        backgroundColorHex = 0xFFFBF9F4,
+        lineColorHex = 0xFFE3DDD1
     ),
     RULED_NOTEBOOK(
-        title = "Ruled Writing",
-        subtitle = "College-ruled lines with margin for handwriting",
-        backgroundColorHex = 0xFFFCFBF7,
-        lineColorHex = 0xFFBFD4E8
+        title = "Manuscript Ruled",
+        subtitle = "Archival ruled lines with sienna margin",
+        symbolGlyph = "≡",
+        backgroundColorHex = 0xFFFAF8F2,
+        lineColorHex = 0xFFD2DCE4
     ),
     DOT_MATRIX(
-        title = "5mm Dot Grid",
-        subtitle = "Precision bullet journal dot matrix",
-        backgroundColorHex = 0xFFF9F8F3,
-        lineColorHex = 0xFFC8C2B4
+        title = "5mm Architectural Dot",
+        subtitle = "Precision dot matrix for lettering & CAD",
+        symbolGlyph = "∷",
+        backgroundColorHex = 0xFFF8F6F0,
+        lineColorHex = 0xFFC5BEB0
     ),
     GRAPH_ENGINEERING(
-        title = "Quad Graph",
-        subtitle = "Engineering major & minor square grid",
-        backgroundColorHex = 0xFFF6F9FC,
-        lineColorHex = 0xFFD0DFEE
+        title = "Engineering Quad",
+        subtitle = "Major & minor millimeter coordinate grid",
+        symbolGlyph = "⊞",
+        backgroundColorHex = 0xFFF5F7F6,
+        lineColorHex = 0xFFD1DBD7
     ),
     ISOMETRIC_DRAFT(
-        title = "Isometric 3D",
-        subtitle = "30° architectural axonometric grid",
-        backgroundColorHex = 0xFFF7F8FA,
-        lineColorHex = 0xFFD4DAE4
+        title = "Isometric 30° Grid",
+        subtitle = "Axonometric structural drafting matrix",
+        symbolGlyph = "⬡",
+        backgroundColorHex = 0xFFF6F6F4,
+        lineColorHex = 0xFFD4D6D0
     ),
     DARK_SLATE(
-        title = "Midnight Slate",
-        subtitle = "High-contrast dark studio canvas",
-        backgroundColorHex = 0xFF14161B,
-        lineColorHex = 0xFF282C37,
+        title = "Espresso Blueprint",
+        subtitle = "Warm dark umber slate for light chalk & ochre",
+        symbolGlyph = "■",
+        backgroundColorHex = 0xFF1F1D1B,
+        lineColorHex = 0xFF33302C,
         isDark = true
     )
 }
@@ -104,12 +145,12 @@ enum class ScreenCoveragePreset(
     STUDIO_BALANCED(
         label = "Studio Balanced (0.90f)",
         targetCanvasFloat = 0.90f,
-        description = "90.0% screen cover • Adaptive floating toolbars"
+        description = "90.0% screen cover • Modular floating studio pods"
     ),
     DRAFTING_SPLIT(
         label = "Inspector Split (0.78f)",
         targetCanvasFloat = 0.78f,
-        description = "78.0% screen cover • Docked color & telemetry panel"
+        description = "78.0% screen cover • Docked color & calibration deck"
     ),
     CUSTOM_FLOAT(
         label = "Custom Float",
@@ -129,17 +170,33 @@ enum class DevicePosture(
 }
 
 @Immutable
+data class StudioCustomization(
+    val themeId: StudioThemeId = StudioThemeId.ATELIER_LINEN,
+    val cornerRadiusDp: Float = 16f,
+    val widgetOpacityFloat: Float = 0.95f,
+    val gridSpacingMultiplierFloat: Float = 1.0f,
+    val gridLineOpacityFloat: Float = 0.80f,
+    val layoutPreset: FloatingLayoutPreset = FloatingLayoutPreset.ATELIER_BALANCED,
+    // Independent Floating Widget Visibility Toggles
+    val showToolPod: Boolean = true,
+    val isToolPodCompact: Boolean = false,
+    val showColorPod: Boolean = true,
+    val showZoomCompassPod: Boolean = true,
+    val showSymbolStampPod: Boolean = true,
+    val showScratchpadPod: Boolean = false,
+    val showRulerGuideOverlay: Boolean = false,
+    val rulerAngleDegrees: Float = 0f,
+    val rulerYFraction: Float = 0.50f,
+    val scratchpadNoteText: String = "• Sketch elevation proportions\n• Check nib weight (5.2px)\n• Stamp North axis & scale"
+)
+
+@Immutable
 data class StrokePoint(
     val x: Float,
     val y: Float,
     val pressure: Float = 1.0f
 )
 
-/**
- * High-performance stroke model that pre-computes and caches both its smoothed [Path]
- * and its axis-aligned bounding box [bounds] once upon creation so Canvas [onDraw]
- * never allocates or recalculates Bezier paths on every frame.
- */
 @Immutable
 data class DrawnStroke(
     val id: String,
@@ -219,7 +276,6 @@ data class ScreenFloatMetrics(
     val bottomDockWidthFraction: Float,
     val sideRailWidthFraction: Float,
     val inspectorWidthFraction: Float,
-    // Home Explorer Variable-Screen Float Allocations
     val homeSidebarWidthFraction: Float,
     val homeContentWidthFraction: Float,
     val homeGridColumns: Int
@@ -232,29 +288,30 @@ data class ScreenFloatMetrics(
 }
 
 object StudioPalettes {
+    // Non-Neon Archival Artist & Drafting Pigments
     val CuratedSwatches: List<Color> = listOf(
-        Color(0xFF18181B), // Obsidian Ink
-        Color(0xFFE85D04), // Vermilion Studio
-        Color(0xFF1D4ED8), // Cobalt Fountain Ink
-        Color(0xFF059669), // Emerald Drafting
-        Color(0xFFD97706), // Ochre Gold
-        Color(0xFFDC2626), // Crimson Red
-        Color(0xFF7C3AED), // Ultramarine Violet
-        Color(0xFF0D9488), // Teal Cyan
-        Color(0xFFDB2777), // Magenta Rose
-        Color(0xFF4F46E5), // Indigo Night
-        Color(0xFF57534E), // Warm Graphite
-        Color(0xFFF8FAFC)  // Titanium White
+        Color(0xFF232625), // Sumi Carbon Ink
+        Color(0xFF8C5843), // Burnt Terracotta Sienna
+        Color(0xFF3D5265), // Prussian Drafting Blue
+        Color(0xFF526B5C), // Botanical Sage Green
+        Color(0xFFA67C52), // Raw Roman Ochre
+        Color(0xFF7A3E48), // Venetian Burgundy
+        Color(0xFF5D536B), // Muted Mineral Violet
+        Color(0xFF4F6D66), // Deep Eucalyptus
+        Color(0xFF646E57), // Olive Umber
+        Color(0xFF5A524C), // Warm Sepia Walnut
+        Color(0xFF787D82), // Architectural Pewter
+        Color(0xFFF6F4EE)  // Unbleached Titanium Chalk
     )
 
     val FolderAccentSwatches: List<Long> = listOf(
-        0xFFE85D04L, // Vermilion
-        0xFF2A9D8FL, // Teal Studio
-        0xFFF4A261L, // Amber Gold
-        0xFF3B82F6L, // Cobalt Blue
-        0xFF8B5CF6L, // Royal Violet
-        0xFF10B981L, // Emerald Green
-        0xFFEC4899L, // Rose Pink
-        0xFF64748BL  // Slate Metal
+        0xFF8C5843L, // Muted Sienna
+        0xFF526B5CL, // Botanical Sage
+        0xFF3D5265L, // Prussian Slate
+        0xFFA67C52L, // Roman Ochre
+        0xFF7A3E48L, // Venetian Umber
+        0xFF5D536BL, // Mineral Violet
+        0xFF646E57L, // Olive Moss
+        0xFF4A4E4DL  // Sumi Graphite
     )
 }

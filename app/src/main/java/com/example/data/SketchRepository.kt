@@ -135,23 +135,23 @@ class SketchRepository(
             FolderEntity(
                 parentFolderId = null,
                 name = "Architecture & Design",
-                colorArgb = 0xFFE85D04L,
+                colorArgb = 0xFF8C5843L,
                 iconName = FolderIconType.ARCHITECTURE.name
             )
         )
         val notesFolderId = folderDao.upsertFolder(
             FolderEntity(
                 parentFolderId = null,
-                name = "Handwritten Study Notes",
-                colorArgb = 0xFF2A9D8FL,
+                name = "Manuscript Study Notes",
+                colorArgb = 0xFF526B5CL,
                 iconName = FolderIconType.NOTES.name
             )
         )
         val artFolderId = folderDao.upsertFolder(
             FolderEntity(
                 parentFolderId = null,
-                name = "Color & Brush Studies",
-                colorArgb = 0xFFF4A261L,
+                name = "Pigment & Wash Studies",
+                colorArgb = 0xFFA67C52L,
                 iconName = FolderIconType.PALETTE.name
             )
         )
@@ -161,7 +161,7 @@ class SketchRepository(
             FolderEntity(
                 parentFolderId = designFolderId,
                 name = "Tablet UI Wireframes",
-                colorArgb = 0xFF3B82F6L,
+                colorArgb = 0xFF3D5265L,
                 iconName = FolderIconType.GEOMETRY.name
             )
         )
@@ -169,7 +169,7 @@ class SketchRepository(
             FolderEntity(
                 parentFolderId = designFolderId,
                 name = "Studio Floor Plans",
-                colorArgb = 0xFF8B5CF6L,
+                colorArgb = 0xFF5D536BL,
                 iconName = FolderIconType.ARCHITECTURE.name
             )
         )
@@ -177,7 +177,7 @@ class SketchRepository(
             FolderEntity(
                 parentFolderId = notesFolderId,
                 name = "Fountain Nib Drills",
-                colorArgb = 0xFF10B981L,
+                colorArgb = 0xFF646E57L,
                 iconName = FolderIconType.BOOKMARK.name
             )
         )
@@ -187,26 +187,26 @@ class SketchRepository(
         val starterNotes = listOf(
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "CanvasFlow 2.0 • 60fps Path-Cached Engine",
+                text = "CanvasFlow Atelier • 60fps Path-Cached Studio",
                 x = 120f,
                 y = 95f,
-                colorArgb = 0xFF18181BL,
+                colorArgb = 0xFF232625L,
                 fontSizeSp = 19f
             ),
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "Multi-Screen Float Coverage • Pinch to Zoom (0.25x - 8.0x)",
+                text = "Modular Floating Pods • Pinch to Zoom (0.25x - 8.0x)",
                 x = 120f,
                 y = 132f,
-                colorArgb = 0xFFE85D04L,
+                colorArgb = 0xFF8C5843L,
                 fontSizeSp = 15f
             )
         )
         val firstId = savePage(
             id = 0L,
-            folderId = null, // Root Workspace for immediate visibility + also accessible in Recents/Favorites
+            folderId = null,
             isFavorite = true,
-            title = "Studio Welcome & Color Study",
+            title = "Atelier Welcome & Pigment Study",
             categoryTag = "Drawing & Notes",
             paperTemplate = PaperTemplate.DOT_MATRIX,
             strokes = starterStrokes,
@@ -214,7 +214,7 @@ class SketchRepository(
             zoomFloat = 1.0f
         )
 
-        // 4. Starter Sheet 2 (Inside Handwritten Study Notes): Calligraphy & Ruled Notes
+        // 4. Starter Sheet 2 (Inside Manuscript Study Notes): Calligraphy & Ruled Notes
         val ruledStrokes = buildStarterHandwritingSheet()
         val ruledNotes = listOf(
             CanvasTextNote(
@@ -222,15 +222,15 @@ class SketchRepository(
                 text = "Handwriting & Fountain Nib Practice",
                 x = 150f,
                 y = 104f,
-                colorArgb = 0xFF1D4ED8L,
+                colorArgb = 0xFF3D5265L,
                 fontSizeSp = 20f
             ),
             CanvasTextNote(
                 id = UUID.randomUUID().toString(),
-                text = "1. Fountain Nib responds smoothly with zero frame lag\n2. Organize sheets into unlimited nested folders",
+                text = "1. Fountain Nib responds smoothly with zero frame lag\n2. Stamp architectural symbols & use the interactive ruler",
                 x = 150f,
                 y = 148f,
-                colorArgb = 0xFF18181BL,
+                colorArgb = 0xFF232625L,
                 fontSizeSp = 14f
             )
         )
@@ -238,7 +238,7 @@ class SketchRepository(
             id = 0L,
             folderId = notesFolderId,
             isFavorite = true,
-            title = "Calligraphy & Ruled Notes",
+            title = "Calligraphy & Manuscript Notes",
             categoryTag = "Handwriting",
             paperTemplate = PaperTemplate.RULED_NOTEBOOK,
             strokes = ruledStrokes,
@@ -262,7 +262,7 @@ class SketchRepository(
                     text = "FLOAT COVERAGE SPEC: 0.92f CANVAS / 0.08f HUD",
                     x = 130f,
                     y = 110f,
-                    colorArgb = 0xFFF4A261L,
+                    colorArgb = 0xFFA67C52L,
                     fontSizeSp = 16f
                 )
             ),
@@ -412,7 +412,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = arc1,
-                    colorArgb = 0xFFE85D04L,
+                    colorArgb = 0xFF8C5843L,
                     strokeWidth = 16f,
                     alpha = 0.85f,
                     tool = DrawingTool.ART_BRUSH
@@ -431,7 +431,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = arc2,
-                    colorArgb = 0xFFF4A261L,
+                    colorArgb = 0xFFA67C52L,
                     strokeWidth = 14f,
                     alpha = 0.88f,
                     tool = DrawingTool.CHISEL_MARKER
@@ -450,7 +450,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = arc3,
-                    colorArgb = 0xFF2A9D8FL,
+                    colorArgb = 0xFF526B5CL,
                     strokeWidth = 11f,
                     alpha = 0.92f,
                     tool = DrawingTool.FOUNTAIN_PEN
@@ -464,7 +464,7 @@ class SketchRepository(
                         StrokePoint(130f, 220f),
                         StrokePoint(590f, 520f)
                     ),
-                    colorArgb = 0xFF18181BL,
+                    colorArgb = 0xFF232625L,
                     strokeWidth = 3.2f,
                     alpha = 0.75f,
                     tool = DrawingTool.RECTANGLE_SHAPE
@@ -483,7 +483,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = flourish,
-                    colorArgb = 0xFF1D4ED8L,
+                    colorArgb = 0xFF3D5265L,
                     strokeWidth = 5.5f,
                     alpha = 1.0f,
                     tool = DrawingTool.FOUNTAIN_PEN
@@ -502,9 +502,9 @@ class SketchRepository(
                         StrokePoint(148f, 128f),
                         StrokePoint(530f, 128f)
                     ),
-                    colorArgb = 0xFFF4A261L,
+                    colorArgb = 0xFFA67C52L,
                     strokeWidth = 20f,
-                    alpha = 0.40f,
+                    alpha = 0.35f,
                     tool = DrawingTool.CHISEL_MARKER
                 )
             )
@@ -521,7 +521,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = loops,
-                    colorArgb = 0xFF1D4ED8L,
+                    colorArgb = 0xFF3D5265L,
                     strokeWidth = 5.0f,
                     alpha = 1.0f,
                     tool = DrawingTool.FOUNTAIN_PEN
@@ -535,7 +535,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = listOf(StrokePoint(130f, 180f), StrokePoint(620f, 480f)),
-                    colorArgb = 0xFF2A9D8FL,
+                    colorArgb = 0xFF526B5CL,
                     strokeWidth = 3.5f,
                     alpha = 0.9f,
                     tool = DrawingTool.RECTANGLE_SHAPE
@@ -543,7 +543,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = listOf(StrokePoint(260f, 240f), StrokePoint(490f, 420f)),
-                    colorArgb = 0xFFE85D04L,
+                    colorArgb = 0xFF8C5843L,
                     strokeWidth = 4.0f,
                     alpha = 0.95f,
                     tool = DrawingTool.CIRCLE_SHAPE
@@ -551,7 +551,7 @@ class SketchRepository(
                 DrawnStroke(
                     id = UUID.randomUUID().toString(),
                     points = listOf(StrokePoint(130f, 180f), StrokePoint(620f, 480f)),
-                    colorArgb = 0xFFF4A261L,
+                    colorArgb = 0xFFA67C52L,
                     strokeWidth = 2.5f,
                     alpha = 0.75f,
                     tool = DrawingTool.RULER_LINE
